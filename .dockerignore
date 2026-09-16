@@ -1,0 +1,6 @@
+*
+!vendor/
+!vendor/pansou/
+!vendor/pansou/**
+vendor/pansou/.git
+!Dockerfile

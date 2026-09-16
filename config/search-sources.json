@@ -1,0 +1,7 @@
+[
+ {"id":"pansearch","label":"PanSearch","kind":"plugin"},
+ {"id":"hunhepan","label":"混合盘","kind":"plugin"},
+ {"id":"quarksoo","label":"夸克搜","kind":"plugin"},
+ {"id":"yunpanx","label":"云盘资源分享 · yunpanx","kind":"channel"},
+ {"id":"yunpanshare","label":"云盘分享 · yunpanshare","kind":"channel"}
+]

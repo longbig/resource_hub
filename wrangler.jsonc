@@ -1,0 +1,89 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "shicang-resource-hub",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "vars": {
+    "ENVIRONMENT": "production",
+    "SITE_NAME": "拾藏资源库",
+    "SITE_ORIGIN": "",
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": "",
+    "ADMIN_EMAILS": ""
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "shicang-resources",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "shicang-media"
+    }
+  ],
+  "env": {
+    "local": {
+      "name": "shicang-resource-hub-local",
+      "vars": {
+        "ENVIRONMENT": "local",
+        "SITE_NAME": "拾藏资源库",
+        "SITE_ORIGIN": "http://127.0.0.1:8787",
+        "ACCESS_TEAM_DOMAIN": "",
+        "ACCESS_AUD": "",
+        "ADMIN_EMAILS": ""
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "shicang-local",
+          "database_id": "00000000-0000-0000-0000-000000000001",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA",
+          "bucket_name": "shicang-local-media"
+        }
+      ],
+      "containers": [],
+      "durable_objects": {
+        "bindings": []
+      }
+    }
+  },
+  "containers": [
+    {
+      "class_name": "PanSouContainer",
+      "image": "./Dockerfile",
+      "max_instances": 1,
+      "instance_type": "basic"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PANSOU_CONTAINER",
+        "class_name": "PanSouContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "pansou-v1",
+      "new_sqlite_classes": [
+        "PanSouContainer"
+      ]
+    }
+  ]
+}
