@@ -6,7 +6,7 @@ const production=process.env.TEST_PRODUCTION_ORIGIN;
 const request=(path,method='GET',body,headers={})=>fetch(base+path,{method,headers:{...(method==='GET'?{}:{Origin:base}),...(body?{'Content-Type':'application/json'}:{}),...headers},body:body?JSON.stringify(body):undefined,redirect:'manual'});
 const nonce=crypto.randomUUID().slice(0,8);
 const seed={title:`验收测试-${nonce}`,summary:'验证发布、中文搜索和安全边界',body:'## 目录\n\n- 第一个项目\n- 第二个项目\n\n<script>alert(1)</script>',category_id:'',tags:'验收,中文检索',format:'PDF',size:'',cover_key:'',status:'draft',featured:false,links:[{provider:'quark',url:'https://pan.quark.cn/s/local-test-not-a-real-resource',code:'test',status:'active'}]};
-let resourceId,linkId,categoryId,uploadKey;
+let resourceId,linkId,categoryId;
 
 test('完整资源流程与边界验证',async t=>{
   await t.test('本地服务健康、首页包含主要浏览入口',async()=>{
@@ -72,12 +72,10 @@ test('完整资源流程与边界验证',async t=>{
     const data=await (await request('/api/admin/export')).json();const imported=data.resources.find(r=>r.title===rows[0].title);assert.equal(imported.status,'draft');
     try{assert.equal((await request('/api/admin/import','POST',{rows,confirm:true})).status,400);}finally{await request('/api/admin/resources/'+imported.id,'DELETE');}
   });
-  await t.test('图片上传拒绝伪装文件，允许真实 PNG 并可读取',async()=>{
-    const fake=new FormData();fake.append('file',new Blob(['<script>bad</script>'],{type:'image/png'}),'fake.png');
-    assert.equal((await fetch(base+'/api/admin/upload',{method:'POST',headers:{Origin:base},body:fake})).status,400);
-    const data=new FormData();data.append('file',new Blob([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jGZkAAAAASUVORK5CYII=','base64')],{type:'image/png'}),'test.png');
-    const r=await fetch(base+'/api/admin/upload',{method:'POST',headers:{Origin:base},body:data});assert.equal(r.status,200);uploadKey=(await r.json()).key;
-    const image=await request('/media/'+uploadKey);assert.equal(image.status,200);assert.equal(image.headers.get('content-type'),'image/png');
+  await t.test('无图片存储时后台不显示上传入口，旧图片接口返回 404',async()=>{
+    const html=await (await request('/admin/new')).text();assert.doesNotMatch(html,/cover-upload/);
+    assert.equal((await request('/api/admin/upload','POST',{})).status,404);
+    assert.equal((await request('/media/00000000000000000000000000000000.png')).status,404);
   });
   await t.test('所有后台页面和帮助页可渲染',async()=>{
     for(const p of ['/categories','/about','/request','/admin/requests','/admin','/admin/new','/admin/categories','/admin/reports','/admin/stats','/admin/data','/admin/settings'])assert.equal((await request(p)).status,200,p);

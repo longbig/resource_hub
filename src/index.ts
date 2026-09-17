@@ -56,11 +56,7 @@ app.get('/go/:id',async c=>{
   if(c.req.method==='GET')c.executionCtx.waitUntil(c.env.DB.prepare("INSERT INTO daily_clicks(day,resource_id,provider,channel,count) VALUES(?,?,?,?,1) ON CONFLICT(day,resource_id,provider,channel) DO UPDATE SET count=count+1").bind(new Date(Date.now()+8*3600000).toISOString().slice(0,10),link.resource_id,link.provider,channel(c.req.query('from'))).run().catch(err=>console.error('Click tracking unavailable',err.message)));
   c.header('X-Robots-Tag','noindex, nofollow'); return c.redirect(link.url,302);
 });
-app.get('/media/:key',async c=>{
-  const key=c.req.param('key');if(!/^[a-f0-9]{32}\.(jpg|png|webp)$/.test(key))return c.notFound();
-  const obj=await c.env.MEDIA.get(key);if(!obj)return c.notFound();
-  c.header('Content-Type',obj.httpMetadata?.contentType||'application/octet-stream');c.header('Cache-Control','public,max-age=31536000,immutable');c.header('ETag',obj.httpEtag);return c.body(obj.body);
-});
+app.get('/media/:key',c=>c.notFound());
 app.get('/help',c=>c.redirect('/about',301));
 app.get('/about',async c=>{
   const name=await siteName(c.env.DB,c.env.SITE_NAME);
@@ -133,15 +129,7 @@ async function saveResource(db:D1Database,b:ResourceInput,id:string,existing:boo
 app.post('/api/admin/resources',async c=>{try{const b=parseResource(await c.req.json());const id=uid();await saveResource(c.env.DB,b,id,false);return c.json({ok:true,id},201);}catch(err){return c.json({error:(err as Error).message},400);}});
 app.put('/api/admin/resources/:id',async c=>{try{const id=c.req.param('id');if(!await c.env.DB.prepare('SELECT id FROM resources WHERE id=?').bind(id).first())return c.json({error:'资源不存在。'},404);await saveResource(c.env.DB,parseResource(await c.req.json()),id,true);return c.json({ok:true,id});}catch(err){return c.json({error:(err as Error).message},400);}});
 app.delete('/api/admin/resources/:id',async c=>{await c.env.DB.prepare('DELETE FROM resources WHERE id=?').bind(c.req.param('id')).run();return c.json({ok:true});});
-app.post('/api/admin/upload',async c=>{
-  const data=await c.req.formData();const file=data.get('file');if(!file||typeof file==='string'||file.size>5*1024*1024)return c.json({error:'请选择不超过 5 MB 的图片。'},400);
-  const bytes=new Uint8Array(await file.arrayBuffer());const text=new TextDecoder();let ext='';
-  if(bytes[0]===0xff&&bytes[1]===0xd8&&bytes[2]===0xff)ext='jpg';
-  if([137,80,78,71,13,10,26,10].every((v,i)=>bytes[i]===v))ext='png';
-  if(text.decode(bytes.slice(0,4))==='RIFF'&&text.decode(bytes.slice(8,12))==='WEBP')ext='webp';
-  if(!ext)return c.json({error:'仅支持真实的 JPG、PNG、WebP 图片。'},400);
-  const key=`${uid()}.${ext}`;await c.env.MEDIA.put(key,bytes,{httpMetadata:{contentType:ext==='jpg'?'image/jpeg':`image/${ext}`}});return c.json({key,url:'/media/'+key});
-});
+app.post('/api/admin/upload',c=>c.json({error:'当前不支持图片上传。'},404));
 
 app.get('/admin/categories',async c=>{
   const rows=await cats(c.env.DB);const content=adminHeading('分类管理','让资源更容易被找到。')+`<div class="admin-two-col"><section class="panel"><h2>已有分类</h2>${rows.map(r=>`<div class="category-admin-row"><div><strong>${e(r.name)}</strong><small>${e(r.description)}</small></div><button class="text-button danger" data-delete-category="${e(r.id)}">删除</button></div>`).join('')||'<p>暂无分类</p>'}</section><form id="category-form" class="panel"><h2>新建分类</h2><label>分类名称<input name="name" required maxlength="30"></label><label>分类介绍<textarea name="description" maxlength="150" rows="3"></textarea></label><label>排序<input type="number" name="position" value="0" min="0" max="999"></label><button class="button primary">添加分类</button></form></div>`;
@@ -164,7 +152,7 @@ app.get('/admin/settings',async c=>{
   return c.html(layout('网站设置',adminHeading('网站设置','维护网站名称与联系信息。')+`<form id="settings-form" class="panel narrow"><label>网站名称<input name="site_name" required maxlength="30" value="${e(settings.site_name||c.env.SITE_NAME)}"></label><label>联系邮箱<input type="email" name="contact_email" maxlength="200" value="${e(settings.contact_email||'')}" placeholder="公开显示在使用帮助页"></label><button class="button primary">保存设置</button></form>`,await siteName(c.env.DB,c.env.SITE_NAME),adminOpts(c.env,'settings')));
 });
 app.put('/api/admin/settings',async c=>{const b=await c.req.json();if(typeof b.site_name!=='string'||!b.site_name.trim()||b.site_name.length>30||typeof b.contact_email!=='string'||b.contact_email.length>200||(b.contact_email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(b.contact_email)))return c.json({error:'请检查网站名称和邮箱格式。'},400);await c.env.DB.batch(['site_name','contact_email'].map(k=>c.env.DB.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(k,b[k].trim())));return c.json({ok:true});});
-app.get('/admin/data',async c=>c.html(layout('导入与备份',adminHeading('导入与备份','批量整理已有资源，保留一份自己的数据副本。')+`<div class="admin-two-col"><section class="panel"><h2>从 CSV 导入资源</h2><p class="muted">每次最多 15 条，先检查内容再确认导入。导入后均为草稿。</p><a class="text-link" href="/api/admin/import-template">下载 CSV 模板 ↓</a><label>选择 CSV 文件<input id="csv-file" type="file" accept=".csv,text/csv"></label><p class="hint">列名：title、summary、category、tags、url、code。当前网盘类型为夸克。</p><div id="import-preview"></div><button class="button primary" id="confirm-import" hidden>确认导入为草稿</button></section><section class="panel"><h2>导出网站数据</h2><p>导出资源、分类、网盘链接、反馈、点击统计和网站设置。</p><a class="button" href="/api/admin/export">下载 JSON 备份 ↓</a><p class="hint">图片存放在 R2，需单独备份。JSON 可用于检查和迁移；完整数据库恢复请使用部署文档中的 D1 备份方式。</p><hr><h2>演示资料</h2><p class="muted">正式使用前，可以清空本地预置的演示资源。你自己发布的资源会保留。</p><button class="button" id="clear-demo">清空演示资料</button></section></div>`,await siteName(c.env.DB,c.env.SITE_NAME),adminOpts(c.env,'data'))));
+app.get('/admin/data',async c=>c.html(layout('导入与备份',adminHeading('导入与备份','批量整理已有资源，保留一份自己的数据副本。')+`<div class="admin-two-col"><section class="panel"><h2>从 CSV 导入资源</h2><p class="muted">每次最多 15 条，先检查内容再确认导入。导入后均为草稿。</p><a class="text-link" href="/api/admin/import-template">下载 CSV 模板 ↓</a><label>选择 CSV 文件<input id="csv-file" type="file" accept=".csv,text/csv"></label><p class="hint">列名：title、summary、category、tags、url、code。当前网盘类型为夸克。</p><div id="import-preview"></div><button class="button primary" id="confirm-import" hidden>确认导入为草稿</button></section><section class="panel"><h2>导出网站数据</h2><p>导出资源、分类、网盘链接、反馈、点击统计和网站设置。</p><a class="button" href="/api/admin/export">下载 JSON 备份 ↓</a><p class="hint">当前不存储图片。JSON 可用于检查和迁移；完整数据库恢复请使用部署文档中的 D1 备份方式。</p><hr><h2>演示资料</h2><p class="muted">正式使用前，可以清空本地预置的演示资源。你自己发布的资源会保留。</p><button class="button" id="clear-demo">清空演示资料</button></section></div>`,await siteName(c.env.DB,c.env.SITE_NAME),adminOpts(c.env,'data'))));
 app.get('/api/admin/import-template',c=>{c.header('Content-Type','text/csv;charset=utf-8');c.header('Content-Disposition','attachment; filename="resource-template.csv"');return c.body('\uFEFFtitle,summary,category,tags,url,code\r\n');});
 app.get('/api/admin/export',async c=>{
   const tables=['categories','resources','links','reports','resource_requests','daily_clicks','settings'];const data:Record<string,unknown>={version:1,exported_at:new Date().toISOString()};

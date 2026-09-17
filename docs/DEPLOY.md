@@ -1,3 +1,7 @@
+> 当前部署采用 Worker + D1 + PanSou Container，不开通 R2，不提供图片上传。域名为 shicangpan.site，Worker 名为 resource-hub。下文历史图片存储步骤不适用于当前版本。
+>
+> GitHub 自动部署：主分支 main，构建命令 `npm run check`，部署命令 `npx wrangler deploy`。首次 D1 迁移已执行；新增迁移后在部署前执行 `npx wrangler d1 migrations apply DB --remote --env=""`。Cloudflare Workers Builds 负责构建 Dockerfile，电脑不需要 Docker。
+
 # 部署到自己的 Cloudflare 账号
 
 ## 需要用户提供的信息

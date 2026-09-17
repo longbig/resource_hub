@@ -1,6 +1,6 @@
 export type Bindings = {
   PANSOU_CONTAINER?: DurableObjectNamespace;
-  DB: D1Database; MEDIA: R2Bucket; ASSETS: Fetcher;
+  DB: D1Database; ASSETS: Fetcher;
   ENVIRONMENT: string; SITE_NAME: string; SITE_ORIGIN: string;
   ACCESS_TEAM_DOMAIN: string; ACCESS_AUD: string; ADMIN_EMAILS: string;
 };

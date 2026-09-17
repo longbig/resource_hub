@@ -1,10 +1,16 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "shicang-resource-hub",
+  "name": "resource-hub",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
   "workers_dev": false,
   "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "shicangpan.site",
+      "custom_domain": true
+    }
+  ],
   "assets": {
     "directory": "./public",
     "binding": "ASSETS"
@@ -12,23 +18,17 @@
   "vars": {
     "ENVIRONMENT": "production",
     "SITE_NAME": "拾藏资源库",
-    "SITE_ORIGIN": "",
+    "SITE_ORIGIN": "https://shicangpan.site",
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": "",
-    "ADMIN_EMAILS": ""
+    "ADMIN_EMAILS": "dnboy985@gmail.com"
   },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "shicang-resources",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "8476d55a-a133-4188-8a6f-86f768fc2e41",
       "migrations_dir": "migrations"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "MEDIA",
-      "bucket_name": "shicang-media"
     }
   ],
   "env": {
@@ -50,16 +50,11 @@
           "migrations_dir": "migrations"
         }
       ],
-      "r2_buckets": [
-        {
-          "binding": "MEDIA",
-          "bucket_name": "shicang-local-media"
-        }
-      ],
       "containers": [],
       "durable_objects": {
         "bindings": []
-      }
+      },
+      "routes": []
     }
   },
   "containers": [

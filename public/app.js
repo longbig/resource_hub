@@ -9,24 +9,18 @@ document.addEventListener('click',async event=>{
   const el=event.target.closest('button');if(!el)return;
   if(el.hasAttribute('data-copy')){try{await navigator.clipboard.writeText(el.dataset.copy);toast('提取码已复制');}catch{toast('复制失败，请长按提取码手动复制。',true);}}
   if(el.hasAttribute('data-remove-link')){el.closest('.link-row').remove();markDirty();}
-  if(el.hasAttribute('data-remove-cover')){$('[name=cover_key]').value='';$('#cover-preview').replaceChildren();$('#cover-upload').value='';markDirty();}
   if(el.dataset.deleteResource&&confirm('确定删除这份资源？关联的链接、反馈和点击统计也会删除，无法撤销。'))await busy(el,async()=>{await api('/api/admin/resources/'+el.dataset.deleteResource,'DELETE');location.reload();});
   if(el.dataset.deleteCategory&&confirm('确定删除这个分类？已有资源的分类需要先调整。'))await busy(el,async()=>{await api('/api/admin/categories/'+el.dataset.deleteCategory,'DELETE');location.reload();});
   if(el.dataset.resolveReport)await busy(el,async()=>{await api('/api/admin/reports/'+el.dataset.resolveReport,'PATCH');location.reload();});
 });
 $$('[data-report]').forEach(form=>form.addEventListener('submit',event=>{event.preventDefault();busy($('button[type=submit],button',form),async()=>{const data=Object.fromEntries(new FormData(form));await api('/api/reports','POST',{...data,resource_id:form.dataset.resource});form.reset();form.closest('details').open=false;toast('反馈已收到，谢谢你帮忙维护这份资源。');});}));
 $('#add-link')?.addEventListener('click',()=>{if($$('.link-row').length>=8){toast('最多添加 8 个网盘入口',true);return;}$('#links-editor').append($('#link-template').content.cloneNode(true));markDirty();});
-let uploading=false,dirty=false;
+let dirty=false;
 const resourceForm=$('#resource-form');
 function markDirty(){dirty=true;$('#form-status').textContent='有未保存的修改';}
 resourceForm?.addEventListener('input',markDirty);
 window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
-$('#cover-upload')?.addEventListener('change',async event=>{
-  const file=event.target.files[0];if(!file)return;if(file.size>5*1024*1024){toast('图片最大 5 MB',true);return;}
-  uploading=true;const submit=$('button[type=submit]',resourceForm);submit.disabled=true;$('#form-status').textContent='正在上传封面…';
-  try{const data=new FormData();data.append('file',file);const result=await api('/api/admin/upload','POST',data);$('[name=cover_key]').value=result.key;const img=new Image();img.src=result.url;img.alt='封面预览';const remove=document.createElement('button');remove.type='button';remove.className='text-button';remove.textContent='移除封面';remove.setAttribute('data-remove-cover','');$('#cover-preview').replaceChildren(img,remove);dirty=true;toast('封面已上传，保存资源后生效');}catch(err){toast(err.message,true);}finally{uploading=false;submit.disabled=false;$('#form-status').textContent=dirty?'有未保存的修改':'请保存资源';}
-});
-resourceForm?.addEventListener('submit',event=>{event.preventDefault();if(uploading)return;busy($('button[type=submit]',resourceForm),async()=>{const data=Object.fromEntries(new FormData(resourceForm));data.featured=$('[name=featured]',resourceForm).checked;data.links=$$('.link-row').map(row=>({id:row.dataset.id,...Object.fromEntries($$('[data-field]',row).map(input=>[input.dataset.field,input.value]))}));const id=resourceForm.dataset.id;const result=await api('/api/admin/resources'+(id?'/'+id:''),id?'PUT':'POST',data);dirty=false;toast(data.status==='published'?'资源已发布':'资源已保存');$('#form-status').textContent='保存成功';if(!id)location.href='/admin/edit/'+result.id;});});
+resourceForm?.addEventListener('submit',event=>{event.preventDefault();busy($('button[type=submit]',resourceForm),async()=>{const data=Object.fromEntries(new FormData(resourceForm));data.featured=$('[name=featured]',resourceForm).checked;data.links=$$('.link-row').map(row=>({id:row.dataset.id,...Object.fromEntries($$('[data-field]',row).map(input=>[input.dataset.field,input.value]))}));const id=resourceForm.dataset.id;const result=await api('/api/admin/resources'+(id?'/'+id:''),id?'PUT':'POST',data);dirty=false;toast(data.status==='published'?'资源已发布':'资源已保存');$('#form-status').textContent='保存成功';if(!id)location.href='/admin/edit/'+result.id;});});
 $('#category-form')?.addEventListener('submit',event=>{event.preventDefault();busy($('button',event.target),async()=>{await api('/api/admin/categories','POST',Object.fromEntries(new FormData(event.target)));location.reload();});});
 $('#settings-form')?.addEventListener('submit',event=>{event.preventDefault();busy($('button',event.target),async()=>{await api('/api/admin/settings','PUT',Object.fromEntries(new FormData(event.target)));toast('设置已保存');location.reload();});});
 $('#clear-demo')?.addEventListener('click',event=>{if(confirm('确定清空全部演示资源？你自己添加的资源不会删除。'))busy(event.target,async()=>{await api('/api/admin/demo','DELETE');toast('演示资料已清空');});});
