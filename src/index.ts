@@ -11,7 +11,7 @@ import { layout, home, detail, editor, e, adminHeading, option } from './views';
 const app = new Hono<AppEnv>();
 const uid = () => crypto.randomUUID().replace(/-/g,'');
 const selectResource = `SELECT r.*,c.name category_name FROM resources r LEFT JOIN categories c ON r.category_id=c.id`;
-app.use('*', secureHeaders({ contentSecurityPolicy: { defaultSrc: ["'self'"], scriptSrc:["'self'"], styleSrc:["'self'"], imgSrc:["'self'",'data:','blob:'], fontSrc:["'self'"], connectSrc:["'self'"], formAction:["'self'"], frameAncestors:["'none'"], baseUri:["'self'"] }, referrerPolicy:'strict-origin-when-cross-origin' }));
+app.use('*', secureHeaders({ contentSecurityPolicy: { defaultSrc: ["'self'"], scriptSrc:["'self'",'https://plausible.shipsolo.io'], styleSrc:["'self'"], imgSrc:["'self'",'data:','blob:'], fontSrc:["'self'"], connectSrc:["'self'",'https://plausible.shipsolo.io'], formAction:["'self'"], frameAncestors:["'none'"], baseUri:["'self'"] }, referrerPolicy:'strict-origin-when-cross-origin' }));
 app.use('*', async(c,next)=>{ c.header('Cache-Control','no-store'); await next(); });
 app.use('/api/*', sameOrigin);
 app.use('/api/*', bodyLimit({maxSize:6*1024*1024,onError:c=>c.json({error:'请求过大，图片最大 5 MB。'},413)}));
