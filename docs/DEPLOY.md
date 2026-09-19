@@ -100,3 +100,11 @@ R2 图片另用 Cloudflare 控制台或 S3 兼容备份工具复制到私人备�
 ## PanSou 搜索版补充（必须先读）
 
 项目已加入 PanSou 容器。正式部署前需 Docker 和 Cloudflare Containers 权限及计费配置；同一项目部署 Worker 与容器，无需额外 VPS。`npm run build` 仅打包 Worker，容器镜像另用 `npm run build:container` 验证。当前机器未安装 Docker，尚未完成镜像构建和云端联调。完整步骤与运行边界见 [PANSOU.md](PANSOU.md)。
+
+### 后台简化与未命中搜索记录更新
+
+发布资源和 CSV 导入现在只填写 `title`、`url`，保存或确认导入后直接发布。后台 `/admin/search-misses` 查看本站未命中的搜索词、次数与首次/最近时间；网络搜索请求不重复计数，刷新搜索页会增加一次。记录保存在 D1 的 `search_misses` 表。旧分类和失效反馈数据保留在数据库备份中，相关页面和接口已移除。
+
+更新线上 Worker 前先执行 `npx wrangler d1 migrations apply DB --remote`，应用 `0003_search_misses.sql`；`npm run deploy` 已包含此步骤。仅运行 Cloudflare 自动构建部署时也需要先应用迁移。
+
+网络结果点击记录更新：上线前应用 `0004_network_result_clicks.sql`。未命中搜索页面支持 CSV 全量导出，按关键词及被点击的链接展开。点击记录包含资源标题、链接、次数和时间，不记录用户身份。同次搜索中同一条结果只记一次；仅展示结果不记点击。点击使用一小时有效的服务器凭据，过期或浏览器未成功上报时不会计入，也不影响打开网盘。

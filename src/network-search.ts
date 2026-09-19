@@ -36,12 +36,45 @@ async function boundedJson(response:Response):Promise<unknown>{
  try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>3*1024*1024)throw Error('response too large');chunks.push(value);}}finally{await reader.cancel().catch(()=>{});}
  const all=new Uint8Array(size);let offset=0;for(const chunk of chunks){all.set(chunk,offset);offset+=chunk.length;}return JSON.parse(new TextDecoder().decode(all));
 }
+type LinkState='ok'|'bad'|'locked'|'unsupported'|'uncertain';
+// Keep the original order except for the first verified result; never check its successors.
+export async function promoteFirstValid(items:NetworkItem[],check:(item:NetworkItem)=>Promise<LinkState>,canContinue=()=>true):Promise<NetworkItem[]> {
+ const retained:NetworkItem[]=[];
+ for(let i=0;i<items.length;i++){
+  if(!canContinue())return [...retained,...items.slice(i)];
+  let state:LinkState;
+  try{state=await check(items[i]);}catch{return [...retained,...items.slice(i)];}
+  if(state==='ok')return [items[i],...retained,...items.slice(i+1)];
+  if(state!=='bad')retained.push(items[i]);
+ }
+ return retained;
+}
+export async function verifyFirstResult(items:NetworkItem[],env:Bindings):Promise<NetworkItem[]> {
+ const deadline=Date.now()+15000;
+ return promoteFirstValid(items,async item=>{
+  const controller=new AbortController();
+  const timeout=Math.min(10500,deadline-Date.now());
+  if(timeout<=0)throw Error('check deadline');
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  const expired=new Promise<never>((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('check timeout'));},timeout);});
+  try{return await Promise.race([(async()=>{
+   const init:RequestInit={method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:[{disk_type:'quark',url:item.url,password:item.code}]}),signal:controller.signal};
+   const response=env.ENVIRONMENT==='local'?await fetch('http://127.0.0.1:8888/api/check/links',init):await env.PANSOU_CONTAINER!.getByName('search').fetch('http://pansou/api/check/links',init);
+   const payload=await boundedJson(response) as {results?:Array<{url?:string;disk_type?:string;state?:string}>};
+   const result=payload?.results;
+   if(!Array.isArray(result)||result.length!==1||result[0].url!==item.url||result[0].disk_type!=='quark'||!['ok','bad','locked','unsupported','uncertain'].includes(result[0].state||''))throw Error('invalid check response');
+   return result[0].state as LinkState;
+  })(),expired]);}finally{if(timer!==undefined)clearTimeout(timer);}
+ },()=>Date.now()<deadline);
+}
 export async function networkSearch(q:string,ids:string[],env:Bindings){
  const selected=searchSources.filter(s=>ids.includes(s.id));if(!selected.length)return {items:[],sources:[]};
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),25000);
  try{const init:RequestInit={method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pansouBody(q,ids)),signal:controller.signal};
  const response=env.ENVIRONMENT==='local'?await fetch('http://127.0.0.1:8888/api/search',init):await env.PANSOU_CONTAINER!.getByName('search').fetch('http://pansou/api/search',init);
- const items=parsePanSou(await boundedJson(response),q,ids);
+ const parsed=parsePanSou(await boundedJson(response),q,ids);
+ clearTimeout(timer);
+ const items=await verifyFirstResult(parsed,env);
  return {items,sources:selected.map(s=>({id:s.id,label:s.label,status:'ok',count:items.filter(i=>i.source===s.label).length} as SourceResult))};
  }catch(error){console.warn('PanSou unavailable:',error instanceof Error?error.message:'error');return {items:[],sources:selected.map(s=>({id:s.id,label:s.label,status:'error',count:0} as SourceResult))};}finally{clearTimeout(timer);}
 }

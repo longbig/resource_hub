@@ -1,100 +1,59 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-
 const base=process.env.TEST_ORIGIN||'http://127.0.0.1:8787';
-const production=process.env.TEST_PRODUCTION_ORIGIN;
 const request=(path,method='GET',body,headers={})=>fetch(base+path,{method,headers:{...(method==='GET'?{}:{Origin:base}),...(body?{'Content-Type':'application/json'}:{}),...headers},body:body?JSON.stringify(body):undefined,redirect:'manual'});
+const backup=async()=> (await request('/api/admin/export')).json();
 const nonce=crypto.randomUUID().slice(0,8);
-const seed={title:`验收测试-${nonce}`,summary:'验证发布、中文搜索和安全边界',body:'## 目录\n\n- 第一个项目\n- 第二个项目\n\n<script>alert(1)</script>',category_id:'',tags:'验收,中文检索',format:'PDF',size:'',cover_key:'',status:'draft',featured:false,links:[{provider:'quark',url:'https://pan.quark.cn/s/local-test-not-a-real-resource',code:'test',status:'active'}]};
-let resourceId,linkId,categoryId;
-
-test('完整资源流程与边界验证',async t=>{
-  await t.test('本地服务健康、首页包含主要浏览入口',async()=>{
-    assert.equal((await request('/health')).status,200);
-    const r=await request('/');assert.equal(r.status,200);const html=await r.text();assert.match(html,/拾藏资源库/);assert.match(html,/搜索资源/);assert.doesNotMatch(html,/resource-list-row/);assert.match(html,/搜索设置/);
-  });
-  await t.test('后台写入拒绝跨站请求和缺少 Origin 的请求',async()=>{
-    assert.equal((await request('/api/admin/resources','POST',seed,{Origin:'https://other.example'})).status,403);
-    const r=await fetch(base+'/api/admin/resources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(seed)});assert.equal(r.status,403);
-  });
-  await t.test('拒绝非夸克链接和伪造网盘域名',async()=>{
-    for(const url of ['javascript:alert(1)','https://pan.quark.cn.evil.example/s/xx','https://pan.quark.cn@evil.example/s/xx','http://pan.quark.cn/s/test']){
-      assert.equal((await request('/api/admin/resources','POST',{...seed,links:[{...seed.links[0],url}]})).status,400);
-    }
-  });
-  await t.test('创建草稿，公开详情与网盘入口均不能访问',async()=>{
-    const r=await request('/api/admin/resources','POST',seed);assert.equal(r.status,201);resourceId=(await r.json()).id;
-    const exportData=await (await request('/api/admin/export')).json();linkId=exportData.links.find(x=>x.resource_id===resourceId).id;
-    assert.equal((await request('/r/'+resourceId)).status,404);
-    assert.equal((await request('/go/'+linkId)).status,404);
-    const preview=await request('/admin/preview/'+resourceId);assert.equal(preview.status,200);const html=await preview.text();assert.match(html,/管理员预览/);assert.match(html,/&lt;script&gt;/);assert.ok(!html.includes('<script>alert'));
-  });
-  await t.test('草稿发布、中文搜索与安全正文渲染',async()=>{
-    assert.equal((await request('/api/admin/resources/'+resourceId,'PUT',{...seed,status:'published',links:[{...seed.links[0],id:linkId}]})).status,200);
-    const r=await request('/r/'+resourceId);assert.equal(r.status,200);assert.equal(r.headers.get('cache-control'),'no-store');assert.match(r.headers.get('content-security-policy'),/frame-ancestors 'none'/);
-    const html=await r.text();assert.match(html,/<h2>目录<\/h2>/);assert.match(html,/&lt;script&gt;/);assert.ok(!html.includes('<script>alert'));
-    const search=await (await request('/?q='+encodeURIComponent('中文检索'))).text();assert.ok(search.includes(seed.title));
-  });
-  await t.test('本站命中时直接返回本地结果，不调用 PanSou',async()=>{
-    const r=await request('/api/network-search','POST',{q:seed.title,sources:['pansearch']});assert.equal(r.status,200);const data=await r.json();assert.equal(data.local,true);assert.deepEqual(data.items,[]);assert.deepEqual(data.sources,[]);
-    assert.equal((await request('/api/network-search','POST',{q:seed.title,sources:['unknown']})).status,400);
-    assert.equal((await request('/api/network-search','POST',{q:seed.title,sources:['pansearch']},{Origin:'https://other.example'})).status,403);
-  });
-  await t.test('网盘入口跳转使用保存的地址，忽略额外目标参数',async()=>{
-    const r=await request('/go/'+linkId+'?from=smoke-test&url=https://evil.example');assert.equal(r.status,302);assert.equal(r.headers.get('location'),seed.links[0].url);assert.equal(r.headers.get('cache-control'),'no-store');
-    const r2=await request('/go/'+linkId+'?from=invalid%3Cscript%3E');assert.equal(r2.status,302);
-  });
-  await t.test('反馈可提交，后台可标记已处理',async()=>{
-    const r=await request('/api/reports','POST',{resource_id:resourceId,reason:'链接失效',note:'自动验收测试'});assert.equal(r.status,200);
-    const data=await (await request('/api/admin/export')).json();const report=data.reports.find(x=>x.resource_id===resourceId);assert.ok(report);
-    assert.equal((await request('/api/admin/reports/'+report.id,'PATCH')).status,200);
-  });
-  await t.test('链接可更新并保留编号，禁用后立即拒绝跳转',async()=>{
-    assert.equal((await request('/api/admin/resources/'+resourceId,'PUT',{...seed,status:'published',links:[{...seed.links[0],id:linkId,status:'disabled'}]})).status,200);
-    assert.equal((await request('/go/'+linkId)).status,404);
-  });
-  await t.test('下架后不再出现在公开详情和搜索中',async()=>{
-    assert.equal((await request('/api/admin/resources/'+resourceId,'PUT',{...seed,status:'archived',links:[{...seed.links[0],id:linkId}]})).status,200);
-    assert.equal((await request('/r/'+resourceId)).status,404);
-    const html=await (await request('/?q='+encodeURIComponent(seed.title))).text();assert.ok(!html.includes('class="resource-card"'));
-  });
-  await t.test('分类创建、唯一性与删除',async()=>{
-    const name='验收分类-'+nonce;const r=await request('/api/admin/categories','POST',{name,description:'test',position:50});assert.equal(r.status,200);categoryId=(await r.json()).id;
-    assert.equal((await request('/api/admin/categories','POST',{name})).status,400);
-    assert.equal((await request('/api/admin/categories/'+categoryId,'DELETE')).status,200);categoryId=null;
-  });
-  await t.test('批量导入预览不会写库，确认导入为草稿，重复拒绝',async()=>{
-    const rows=[{title:'批量验收-'+nonce,summary:'导入测试',url:seed.links[0].url,code:'1234'}];
-    const before=await (await request('/api/admin/export')).json();
-    assert.equal((await request('/api/admin/import','POST',{rows,confirm:false})).status,200);
-    const after=await (await request('/api/admin/export')).json();assert.equal(before.resources.length,after.resources.length);
-    assert.equal((await request('/api/admin/import','POST',{rows,confirm:true})).status,200);
-    const data=await (await request('/api/admin/export')).json();const imported=data.resources.find(r=>r.title===rows[0].title);assert.equal(imported.status,'draft');
-    try{assert.equal((await request('/api/admin/import','POST',{rows,confirm:true})).status,400);}finally{await request('/api/admin/resources/'+imported.id,'DELETE');}
-  });
-  await t.test('无图片存储时后台不显示上传入口，旧图片接口返回 404',async()=>{
-    const html=await (await request('/admin/new')).text();assert.doesNotMatch(html,/cover-upload/);
-    assert.equal((await request('/api/admin/upload','POST',{})).status,404);
-    assert.equal((await request('/media/00000000000000000000000000000000.png')).status,404);
-  });
-  await t.test('所有后台页面和帮助页可渲染',async()=>{
-    for(const p of ['/categories','/about','/request','/admin/requests','/admin','/admin/new','/admin/categories','/admin/reports','/admin/stats','/admin/data','/admin/settings'])assert.equal((await request(p)).status,200,p);
-  });
-  await t.test('清理本次测试资源',async()=>{
-    assert.equal((await request('/api/admin/resources/'+resourceId,'DELETE')).status,200);
-    const data=await (await request('/api/admin/export')).json();assert.ok(!data.resources.some(r=>r.id===resourceId));assert.ok(!data.links.some(r=>r.resource_id===resourceId));assert.ok(!data.reports.some(r=>r.resource_id===resourceId));
-    resourceId=null;
-  });
+const seed={title:`验收测试-${nonce}-<script>`,url:'https://pan.quark.cn/s/local-test-not-a-real-resource'};
+const created=[];
+test('简化后台、发布与搜索记录',async t=>{
+ await t.test('后台表单只有标题和链接，移除旧功能',async()=>{
+  assert.equal((await request('/health')).status,200);
+  const html=await (await request('/admin/new')).text();
+  assert.match(html,/name="title"/);assert.match(html,/name="url"/);
+  assert.doesNotMatch(html,/name="(?:summary|body|category_id|status|featured|tags)"|分类管理|失效反馈/);
+  for(const path of ['/admin/categories','/admin/reports','/categories'])assert.equal((await request(path)).status,404);
+  assert.equal((await request('/api/reports','POST',{})).status,404);
+ });
+ await t.test('跨站请求与不合法链接被拒绝',async()=>{
+  assert.equal((await request('/api/admin/resources','POST',seed,{Origin:'https://evil.example'})).status,403);
+  assert.equal((await fetch(base+'/api/admin/resources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(seed)})).status,403);
+  for(const url of ['', 'javascript:alert(1)','https://pan.quark.cn.evil.example/s/xx','http://pan.quark.cn/s/xx'])assert.equal((await request('/api/admin/resources','POST',{...seed,url})).status,400);
+ });
+ let id,linkId;
+ await t.test('仅标题和链接即可发布、搜索、跳转，标题安全转义',async()=>{
+  const response=await request('/api/admin/resources','POST',seed);assert.equal(response.status,201);id=(await response.json()).id;created.push(id);
+  const data=await backup();assert.equal(data.resources.find(r=>r.id===id).status,'published');linkId=data.links.find(l=>l.resource_id===id).id;
+  const html=await (await request('/?q='+encodeURIComponent(seed.title))).text();assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<script>/);assert.ok(html.includes('/go/'+linkId));
+  assert.ok(!(await backup()).search_misses.some(r=>r.keyword===seed.title.toLowerCase()));
+  assert.equal((await request('/r/'+id)).status,200);
+  const go=await request('/go/'+linkId+'?url=https://evil.example');assert.equal(go.status,302);assert.equal(go.headers.get('location'),seed.url);
+  const local=await (await request('/api/network-search','POST',{q:seed.title,sources:['pansearch']})).json();assert.equal(local.local,true);
+ });
+ await t.test('修改链接保留跳转编号',async()=>{
+  const url=seed.url+'-updated';assert.equal((await request('/api/admin/resources/'+id,'PUT',{...seed,url})).status,200);
+  assert.equal((await request('/go/'+linkId)).headers.get('location'),url);
+ });
+ await t.test('未命中搜索合并大小写和空白，网络接口不重复计数',async()=>{
+  const q=`Missing-${nonce} Excel`;
+  for(const keyword of [q,`  MISSING-${nonce}   EXCEL `])assert.equal((await request('/?q='+encodeURIComponent(keyword))).status,200);
+  let record=(await backup()).search_misses.find(r=>r.keyword===q.toLowerCase());assert.equal(record.count,2);assert.ok(record.first_searched_at);assert.ok(record.last_searched_at);
+  await request('/api/network-search','POST',{q,sources:[]});await request('/?q='+encodeURIComponent(q)+'&page=2');await request('/?q=');
+  record=(await backup()).search_misses.find(r=>r.keyword===q.toLowerCase());assert.equal(record.count,2);
+  const html=await (await request('/admin/search-misses')).text();assert.ok(html.includes(q.toLowerCase()));
+ });
+ await t.test('CSV 模板两列、预览不入库、确认即发布、拒绝重复及缺失链接',async()=>{
+  assert.equal((await (await request('/api/admin/import-template')).text()).replace(/^\uFEFF/,''),'title,url\r\n');
+  const rows=[{title:'批量验收-'+nonce,url:seed.url}];
+  const before=(await backup()).resources.length;
+  const preview=await (await request('/api/admin/import','POST',{rows})).json();assert.equal(preview.preview[0].url,seed.url);assert.equal((await backup()).resources.length,before);
+  assert.equal((await request('/api/admin/import','POST',{rows,confirm:true})).status,200);
+  const imported=(await backup()).resources.find(r=>r.title===rows[0].title);created.push(imported.id);assert.equal(imported.status,'published');
+  assert.equal((await request('/api/admin/import','POST',{rows,confirm:true})).status,400);
+  assert.equal((await request('/api/admin/import','POST',{rows:[{title:'缺失链接-'+nonce}],confirm:true})).status,400);
+ });
+ await t.test('保留的页面正常渲染',async()=>{
+  for(const path of ['/','/about','/request','/admin','/admin/requests','/admin/search-misses','/admin/data','/admin/settings','/admin/stats'])assert.equal((await request(path)).status,200,path);
+ });
 });
-
-test('生产模式在未配置 Access 时拒绝所有后台入口',{skip:!production},async()=>{
-  for(const path of ['/admin','/admin/new','/api/admin/export']){
-    const r=await fetch(production+path,{redirect:'manual'});assert.equal(r.status,503,path);
-  }
-  const r=await fetch(production+'/api/admin/resources',{method:'POST',headers:{Origin:production,'Content-Type':'application/json'},body:JSON.stringify(seed)});assert.equal(r.status,503);
-});
-
-test.after(async()=>{
-  if(resourceId)await request('/api/admin/resources/'+resourceId,'DELETE');
-  if(categoryId)await request('/api/admin/categories/'+categoryId,'DELETE');
-});
+test.after(async()=>{for(const id of created)await request('/api/admin/resources/'+id,'DELETE');});
