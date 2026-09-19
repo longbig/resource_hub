@@ -19,8 +19,8 @@
     "ENVIRONMENT": "production",
     "SITE_NAME": "拾藏资源库",
     "SITE_ORIGIN": "https://shicangpan.site",
-    "ACCESS_TEAM_DOMAIN": "",
-    "ACCESS_AUD": "",
+    "ACCESS_TEAM_DOMAIN": "https://tight-sun-a5c3.cloudflareaccess.com",
+    "ACCESS_AUD": "264494cc79f4cf7f79237a7b086769f04347680516f2aef2f568f976e0621545",
     "ADMIN_EMAILS": "dnboy985@gmail.com"
   },
   "d1_databases": [
