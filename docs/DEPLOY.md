@@ -108,3 +108,7 @@ R2 图片另用 Cloudflare 控制台或 S3 兼容备份工具复制到私人备�
 更新线上 Worker 前先执行 `npx wrangler d1 migrations apply DB --remote`，应用 `0003_search_misses.sql`；`npm run deploy` 已包含此步骤。仅运行 Cloudflare 自动构建部署时也需要先应用迁移。
 
 网络结果点击记录更新：上线前应用 `0004_network_result_clicks.sql`。未命中搜索页面支持 CSV 全量导出，按关键词及被点击的链接展开。点击记录包含资源标题、链接、次数和时间，不记录用户身份。同次搜索中同一条结果只记一次；仅展示结果不记点击。点击使用一小时有效的服务器凭据，过期或浏览器未成功上报时不会计入，也不影响打开网盘。
+
+### 保留平台上的 Access 配置
+
+生产环境的 `ACCESS_AUD` 与 `ACCESS_TEAM_DOMAIN` 在 Worker 设置中的“变量和机密”管理，不放在构建环境变量中，也不写入仓库。`wrangler.jsonc` 顶层设置 `keep_vars: true`，确保 GitHub 自动部署保留平台普通变量。也可使用 Worker Secret。已丢失的变量需在平台重新设置并部署一次；此设置不会恢复历史值。

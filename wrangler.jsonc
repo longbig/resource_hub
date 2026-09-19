@@ -4,6 +4,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
   "workers_dev": false,
+  "keep_vars": true,
   "preview_urls": false,
   "routes": [
     {

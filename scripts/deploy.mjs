@@ -4,8 +4,8 @@ import { spawnSync } from 'node:child_process';
 const config=JSON.parse(readFileSync(new URL('../wrangler.jsonc',import.meta.url),'utf8'));
 const missing=[];
 if(!config.vars.SITE_ORIGIN?.startsWith('https://'))missing.push('SITE_ORIGIN：正式 HTTPS 域名');
-if(!config.vars.ACCESS_TEAM_DOMAIN)missing.push('ACCESS_TEAM_DOMAIN：Cloudflare Access 团队地址');
-if(!config.vars.ACCESS_AUD)missing.push('ACCESS_AUD：后台应用 Audience');
+// Access values are managed in Cloudflare; keep dashboard variables on deployment.
+if(!config.keep_vars)missing.push('keep_vars：必须开启以保留平台上的 Access 配置');
 if(!config.vars.ADMIN_EMAILS)missing.push('ADMIN_EMAILS：后台允许登录的邮箱');
 if(config.d1_databases[0].database_id.startsWith('00000000'))missing.push('database_id：你创建的 D1 数据库 ID');
 if(!config.routes?.length)missing.push('routes：正式自定义域名');
