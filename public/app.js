@@ -39,24 +39,26 @@ document.addEventListener('click',event=>{const button=event.target.closest('[da
 const sourceBoxes=$$('[data-search-source]');
 try{const saved=JSON.parse(localStorage.getItem('shicang-search-sources'));if(Array.isArray(saved))sourceBoxes.forEach(box=>box.checked=saved.includes(box.dataset.searchSource));}catch{}
 let networkRun=0;
+let providerCatalog;
+const loadProviders=()=>providerCatalog||(providerCatalog=api('/providers.json').catch(error=>{providerCatalog=undefined;throw error;}));
 function textNode(tag,text,className){const el=document.createElement(tag);el.textContent=text;if(className)el.className=className;return el;}
 async function loadNetwork(){
  const root=$('#network-results');if(!root)return;const run=++networkRun;
  root.replaceChildren(textNode('p','搜索中…','muted'));
- try{const data=await api('/api/network-search','POST',{q:root.dataset.query,sources:sourceBoxes.filter(b=>b.checked).map(b=>b.dataset.searchSource)});if(run!==networkRun)return;
- if(data.local){location.replace('/?'+new URLSearchParams({q:root.dataset.query}));return;}
+ try{const catalog=await loadProviders();const data=await api('/api/network-search','POST',{q:root.dataset.query,provider:root.dataset.provider,category:root.dataset.category,sources:sourceBoxes.filter(b=>b.checked).map(b=>b.dataset.searchSource)});if(run!==networkRun)return;
+ if(data.local){location.reload();return;}
  const failures=data.sources.filter(s=>s.status==='error');root.replaceChildren();
- const heading=root.closest('section').querySelector('h2');heading.replaceChildren(document.createTextNode('搜索结果'),textNode('span',String(data.items.length)));
+ const heading=root.closest('section').querySelector('h2');heading.replaceChildren(document.createTextNode('搜索结果'),textNode('span',String(Number(root.dataset.localTotal||0)+data.items.length)));
  const list=textNode('div','','resource-list');for(const [index,item] of data.items.entries()){
- const url=new URL(item.url);if(url.protocol!=='https:'||url.hostname!=='pan.quark.cn')continue;
+ const p=catalog[item.provider];if(!p)continue;const url=new URL(item.url);if(url.protocol!=='https:'||url.username||url.password||url.port||!p.hosts.includes(url.hostname)||!new RegExp(p.path).test(url.pathname))continue;
  const row=textNode('a','','search-result');row.href=url.href;row.target='_blank';row.rel='noopener noreferrer nofollow';
  let tracked=false;
  const recordClick=event=>{if(tracked||!data.clickToken||(event.type==='auxclick'&&event.button!==1))return;tracked=true;fetch('/api/network-click',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:data.clickToken,index}),keepalive:true}).catch(()=>{});};
  row.addEventListener('click',recordClick);row.addEventListener('auxclick',recordClick);
  const top=textNode('div','','search-result-top'),date=new Date(item.datetime),valid=item.datetime&&!Number.isNaN(date.getTime());const time=textNode('time',valid?date.toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}):'时间未知');if(valid)time.dateTime=date.toISOString();top.append(textNode('h3',item.title),time);
- const bottom=textNode('div','','search-result-link');bottom.append(textNode('span',url.href));if(item.code)bottom.append(textNode('span','提取码：'+item.code,'result-code'));const arrow=textNode('span','↗');arrow.setAttribute('aria-hidden','true');bottom.append(arrow);row.append(top,bottom);list.append(row);
+ const bottom=textNode('div','','search-result-link');bottom.append(textNode('span',url.href),textNode('span',p.label,'result-provider'));if(item.code)bottom.append(textNode('span','提取码：'+item.code,'result-code'));const arrow=textNode('span','↗');arrow.setAttribute('aria-hidden','true');bottom.append(arrow);row.append(top,bottom);list.append(row);
  }if(list.childElementCount)root.append(list);
- if(!data.items.length){const message=data.disabled?'暂无搜索结果，可在搜索设置中启用更多来源。':failures.length===data.sources.length?'搜索暂时不可用，请稍后重试。':'没有找到相关资源，可以提交资源需求。';const status=textNode('p',message,'muted');status.setAttribute('role','status');root.append(status);const retry=textNode('button','重新搜索','button');retry.addEventListener('click',loadNetwork);root.append(retry);}
+ if(!data.items.length&&Number(root.dataset.localTotal||0)===0){const message=data.disabled?'暂无搜索结果，可在搜索设置中启用更多来源。':failures.length===data.sources.length?'搜索暂时不可用，请稍后重试。':'没有找到相关资源，请尝试其他关键词或网盘。';const status=textNode('p',message,'muted');status.setAttribute('role','status');root.append(status);const retry=textNode('button','重新搜索','button');retry.addEventListener('click',loadNetwork);root.append(retry);}
  }catch(err){if(run!==networkRun)return;root.replaceChildren(textNode('p',err.message,'muted'));const retry=textNode('button','重试','button');retry.addEventListener('click',loadNetwork);root.append(retry);}
 }
 sourceBoxes.forEach(box=>box.addEventListener('change',()=>{try{localStorage.setItem('shicang-search-sources',JSON.stringify(sourceBoxes.filter(b=>b.checked).map(b=>b.dataset.searchSource)));}catch{}loadNetwork();}));

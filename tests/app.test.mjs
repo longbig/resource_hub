@@ -9,6 +9,7 @@ const created=[];
 test('简化后台、发布与搜索记录',async t=>{
  await t.test('后台表单只有标题和链接，移除旧功能',async()=>{
   assert.equal((await request('/health')).status,200);
+  const homepage=await (await request('/')).text();assert.match(homepage,/value="quark" class="provider-tab active" aria-pressed="true"/);assert.match(homepage,/form="resource-search" name="provider" value="baidu"/);assert.doesNotMatch(homepage,/<select[^>]*name="provider"/);
   const html=await (await request('/admin/new')).text();
   assert.match(html,/name="title"/);assert.match(html,/name="url"/);
   assert.doesNotMatch(html,/name="(?:summary|body|category_id|status|featured|tags)"|分类管理|失效反馈/);
@@ -28,7 +29,7 @@ test('简化后台、发布与搜索记录',async t=>{
   assert.ok(!(await backup()).search_misses.some(r=>r.keyword===seed.title.toLowerCase()));
   assert.equal((await request('/r/'+id)).status,200);
   const go=await request('/go/'+linkId+'?url=https://evil.example');assert.equal(go.status,302);assert.equal(go.headers.get('location'),seed.url);
-  const local=await (await request('/api/network-search','POST',{q:seed.title,sources:['pansearch']})).json();assert.equal(local.local,true);
+  const local=await (await request('/api/network-search','POST',{q:seed.title,provider:'quark',sources:['pansearch']})).json();assert.equal(local.local,true);
  });
  await t.test('修改链接保留跳转编号',async()=>{
   const url=seed.url+'-updated';assert.equal((await request('/api/admin/resources/'+id,'PUT',{...seed,url})).status,200);
@@ -51,6 +52,24 @@ test('简化后台、发布与搜索记录',async t=>{
   const imported=(await backup()).resources.find(r=>r.title===rows[0].title);created.push(imported.id);assert.equal(imported.status,'published');
   assert.equal((await request('/api/admin/import','POST',{rows,confirm:true})).status,400);
   assert.equal((await request('/api/admin/import','POST',{rows:[{title:'缺失链接-'+nonce}],confirm:true})).status,400);
+ });
+ await t.test('其他网盘自动识别、编辑切换和 CSV 导入，按网盘匹配本地库',async()=>{
+  const title='多盘验收-'+nonce;
+  const response=await request('/api/admin/resources','POST',{title,url:'https://pan.baidu.com/s/otherdrive?pwd=abcd'});assert.equal(response.status,201);
+  const id=(await response.json()).id;created.push(id);
+  let link=(await backup()).links.find(l=>l.resource_id===id);assert.equal(link.provider,'baidu');assert.equal(link.code,'abcd');
+  const html=await (await request('/?q='+title+'&provider=baidu')).text();assert.ok(html.includes('/go/'+link.id));assert.ok(!html.includes('id="network-results"'));
+  const all=await (await request('/?q='+title+'&provider=all')).text();assert.ok(all.includes('/go/'+link.id));assert.ok(all.includes('id="network-results"'));
+  const own=await (await request('/api/network-search','POST',{q:title,provider:'baidu',sources:[]})).json();assert.equal(own.local,true);
+  const other=await (await request('/api/network-search','POST',{q:title,provider:'quark',sources:[]})).json();assert.equal(other.local,false);
+  const mixed=await (await request('/api/network-search','POST',{q:title,provider:'all',sources:[]})).json();assert.equal(mixed.local,false);
+  assert.equal((await request('/api/network-search','POST',{q:title,provider:'unknown',sources:[]})).status,400);
+  assert.equal((await request('/?q='+title+'&provider=unknown')).status,400);
+  await request('/api/admin/resources/'+id,'PUT',{title,url:'https://www.alipan.com/s/newshare'});
+  const oldId=link.id;link=(await backup()).links.find(l=>l.resource_id===id);assert.equal(link.id,oldId);assert.equal(link.provider,'aliyun');assert.equal(link.code,'');
+  assert.equal((await request('/go/'+link.id)).headers.get('location'),'https://www.alipan.com/s/newshare');
+  const rows=[{title:title+'-导入',url:'https://cloud.189.cn/t/abc?accessCode=1234'}];assert.equal((await request('/api/admin/import','POST',{rows,confirm:true})).status,200);
+  const data=await backup();const imported=data.resources.find(r=>r.title===rows[0].title);created.push(imported.id);link=data.links.find(l=>l.resource_id===imported.id);assert.equal(link.provider,'tianyi');assert.equal(link.code,'1234');
  });
  await t.test('保留的页面正常渲染',async()=>{
   for(const path of ['/','/about','/request','/admin','/admin/requests','/admin/search-misses','/admin/data','/admin/settings','/admin/stats'])assert.equal((await request(path)).status,200,path);

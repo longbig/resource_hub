@@ -9,7 +9,7 @@
 本地补丁：
 
 - `main.go` 使用 HOST 环境变量指定监听地址，本地限定 `127.0.0.1`，容器内使用 `0.0.0.0`。
-- PanSearch 插件查询增加 `pan=quark`，并将最大并发降至 3、最大 API 页数降至 3、结果上限降至 60，适配本站仅夸克的需求。
+- PanSearch 插件查询已移除原先固定的 `pan=quark` 限制，查询多网盘结果，再由 PanSou 的 `cloud_types` 筛选用户选择的类型。本地与容器缓存目录已更名，避免沿用旧的仅夸克缓存。
 - 其他 Go 源码保持上游版本。升级时请检查并保留这些改动。
 
 ## 单项目运行
@@ -30,13 +30,17 @@ npm run dev
 
 ## 搜索链路
 
-1. 空首页只显示搜索框，不加载资源列表。
-2. 搜索先查 D1 中已发布的本站资源；命中时不调用 PanSou。
+1. 空首页显示搜索框与网盘类型按钮，不加载资源列表；默认选择夸克，点击其他类型会用当前输入关键词搜索。
+2. 搜索先查 D1 中已发布且链接启用的对应网盘资源；命中该网盘时不调用 PanSou。其他网盘的本地命中不会阻止当前网盘搜索。
 3. 无本站匹配时，浏览器请求本站 `/api/network-search`，服务端再次确认本站无匹配。
-4. 根据 `config/search-sources.json` 中的白名单，将勾选项转换为 PanSou 的 `channels`、`plugins`、`src`，固定 `cloud_types: ["quark"]`。使用 `/api/search` 的 `res: all`，以正文辅助判断标题之外的关键词匹配。
-5. 校验返回结构、来源、夸克分享域名和路径，去重后最多显示 60 条。所有外部文本作为纯文本渲染。
+4. 根据 `config/search-sources.json` 中的白名单，将勾选项转换为 PanSou 的 `channels`、`plugins`、`src`，将选中的网盘 ID 传给 `cloud_types`。使用 `/api/search` 的 `res: all`，以正文辅助判断标题之外的关键词匹配。
+5. 校验返回结构、来源、对应网盘分享域名和路径，去重后最多显示 60 条。所有外部文本作为纯文本渲染。
 
 当前启用三个插件（pansearch、hunhepan、quarksoo）与两个频道（yunpanx、yunpanshare）。用户可以在搜索设置中勾选并在浏览器保存偏好。增加来源只需改 JSON，但插件名必须在上游存在，修改后重启或重新部署。
+
+网盘配置集中在 `public/providers.json`，发布、CSV 导入自动根据链接识别网盘。支持 PanSou 的 11 种 HTTP 网盘分享，不开放磁力或 ed2k 协议。
+
+延续首条有效结果置顶策略：按对应网盘类型调用检测，遇到首条有效即停止。PikPak 与光鸭目前没有上游检测支持，保留结果并跳过检测请求。
 
 外部结果不写入你的资源表，不会替换成你的拉新链接。展示来源与提取码。搜索源不代表整个互联网，链接有效性未逐一验证。
 
@@ -51,7 +55,7 @@ npm run dev
 
 ## Cloudflare 部署
 
-同一 `wrangler.jsonc` 配置 Worker + D1 + R2 + PanSouContainer。Worker 通过内部绑定访问容器，不需要另购 VPS，不开放通用 `/api/search` 代理。
+同一 `wrangler.jsonc` 配置 Worker + D1 + PanSouContainer。Worker 通过内部绑定访问容器，不需要另购 VPS，不开放通用 `/api/search` 代理。
 
 容器配置最多 1 个 basic 实例，空闲 5 分钟休眠。容器重启会丢失搜索缓存，不影响 D1 中的资源或反馈。首次冷启动会增加等待时间。
 
@@ -62,7 +66,7 @@ npm run check
 npm test
 npm run build            # 只检查 Worker 打包，不构建/发布容器
 npm run build:container  # 需要 Docker，构建 PanSou 镜像
-npm run deploy          # 配置好域名、D1、R2、Access 后，一起部署
+npm run deploy          # 配置好域名、D1、Access 后，一起部署
 ```
 
 不要把 `--containers-rollout=none` 用于首次正式部署；它仅用于本地 Worker dry-run。

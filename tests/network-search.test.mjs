@@ -6,7 +6,7 @@ const {parsePanSou,pansouBody,quarkUrl,networkSearch,promoteFirstValid,verifyFir
 const envelope=rows=>({code:0,data:{total:rows.length,merged_by_type:{quark:rows}}});
 const row={url:'https://pan.quark.cn/s/abc123',note:'Python 入门教程',source:'plugin:pansearch',password:''};
 test('网络来源选择不会意外启用全部插件或频道',()=>{
- assert.equal(pansouBody('Python',['yunpanx']).src,'tg');assert.equal(pansouBody('Python',['pansearch']).src,'plugin');assert.equal(pansouBody('Python',['pansearch','yunpanx']).src,'all');assert.deepEqual(pansouBody('Python',['pansearch']).cloud_types,['quark']);
+ assert.equal(pansouBody('Python',['yunpanx']).src,'tg');assert.equal(pansouBody('Python',['pansearch']).src,'plugin');assert.equal(pansouBody('Python',['pansearch','yunpanx']).src,'all');assert.deepEqual(pansouBody('Python',['pansearch'],['quark']).cloud_types,['quark']);
 });
 test('PanSou 响应校验、关键词过滤、链接去重与提取码保留',()=>{
  const items=parsePanSou(envelope([row,{...row,password:'abcd'},{...row,url:'https://evil.example/s/x'},{...row,url:'https://pan.quark.cn/s/other',note:'无关内容'},{...row,url:'https://pan.quark.cn/s/unselected',source:'plugin:unknown'}]),'Python',['pansearch']);
@@ -34,7 +34,7 @@ test('网络结果按时间倒序，重复链接保留最新记录，未知时�
  ]),'Python',['pansearch']);assert.deepEqual(items.map(i=>i.url.split('/').pop()),['abc123','middle','unknown']);assert.equal(items[0].title,'Python 新版');assert.equal(items[0].code,'code');assert.equal(items[2].datetime,'');
 });
 
-const candidates=['a','b','c','d'].map(title=>({title,url:'https://pan.quark.cn/s/'+title,code:'1234',datetime:'',summary:'',source:'',sourceUrl:''}));
+const candidates=['a','b','c','d'].map(title=>({provider:'quark',title,url:'https://pan.quark.cn/s/'+title,code:'1234',datetime:'',summary:'',source:'',sourceUrl:''}));
 test('找到首条有效结果就置顶并停止，未知保留、失效过滤、后续不检测',async()=>{
  const calls=[];const states=['uncertain','bad','ok'];
  const result=await promoteFirstValid(candidates,async item=>{calls.push(item.title);return states[calls.length-1];});
@@ -60,4 +60,24 @@ test('调用真实检测协议，传递提取码，找到有效项后不再请�
 test('不信任返回其他链接的检测结果，失败时不隐藏正常搜索结果',async()=>{
  const env={ENVIRONMENT:'production',PANSOU_CONTAINER:{getByName(){return {fetch:async()=>Response.json({results:[{url:'https://pan.quark.cn/s/other',disk_type:'quark',state:'bad'}]})}}}};
  assert.deepEqual(await verifyFirstResult(candidates,env),candidates);
+});
+
+const multiRows={quark:[row],baidu:[{...row,url:'https://pan.baidu.com/s/abc123?pwd=abcd',datetime:'2026-10-01T00:00:00Z'}],mobile:[{...row,url:'https://yun.139.com/shareweb/#/w/i/AAA'},{...row,url:'https://yun.139.com/shareweb/#/w/i/BBB'}]};
+test('多网盘结果保留类型和提取码，相同分享路径不会跨盘去重，移动链接保留 hash',()=>{
+ const payload={code:0,data:{total:4,merged_by_type:multiRows}};
+ const items=parsePanSou(payload,'Python',['pansearch']);
+ assert.equal(items.length,4);assert.equal(items[0].provider,'baidu');assert.equal(items[0].code,'abcd');
+ assert.equal(items.filter(i=>i.provider==='mobile').length,2);
+ assert.deepEqual(parsePanSou(payload,'Python',['pansearch'],['quark']).map(i=>i.provider),['quark']);
+ assert.deepEqual(pansouBody('Python',['pansearch'],['baidu','aliyun']).cloud_types,['baidu','aliyun']);
+});
+test('网盘类型与域名不一致的网络结果不能混入其他网盘',()=>{
+ assert.deepEqual(parsePanSou({code:0,data:{total:1,merged_by_type:{baidu:[row]}}},'Python',['pansearch']),[]);
+});
+test('多网盘有效性检测使用对应 disk_type，不支持检测的网盘保留且不发请求',async()=>{
+ const calls=[];const env={ENVIRONMENT:'production',PANSOU_CONTAINER:{getByName(){return {async fetch(url,init){
+  const item=JSON.parse(init.body).items[0];calls.push(item.disk_type);return Response.json({results:[{...item,state:'ok'}]});
+ }}}}};
+ const items=[{...candidates[0],provider:'pikpak',url:'https://mypikpak.com/s/abc'}, {...candidates[1],provider:'baidu',url:'https://pan.baidu.com/s/xyz'},candidates[2]];
+ assert.deepEqual((await verifyFirstResult(items,env)).map(i=>i.provider),['baidu','pikpak','quark']);assert.deepEqual(calls,['baidu']);
 });

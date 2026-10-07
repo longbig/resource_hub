@@ -1,6 +1,8 @@
 import { issueClickToken, readClick, csvCell } from './search-tracking';
 export { PanSouContainer } from './pansou-container';
 import { searchSources, networkSearch } from './network-search';
+import { identifyProvider, selectedProviders, extractionCode } from './providers';
+import { localSearch } from './local-search';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { secureHeaders } from 'hono/secure-headers';
@@ -26,23 +28,16 @@ const adminOpts = (env:AppEnv['Bindings'],nav:string) => ({admin:true,local:env.
 
 app.get('/health',async c=>{await c.env.DB.prepare('SELECT 1').first();return c.json({ok:true});});
 app.get('/',async c=>{
-  const q=(c.req.query('q')||'').trim().slice(0,100), category=(c.req.query('category')||'').slice(0,64), provider=(c.req.query('provider')||'').slice(0,30);
-  if(!q){const name=await siteName(c.env.DB,c.env.SITE_NAME);return c.html(layout('资源搜索',home([],[],0,'','',1,''),name,{canonical:c.env.SITE_ORIGIN?c.env.SITE_ORIGIN+'/':undefined}));}
+  const q=(c.req.query('q')||'').trim().slice(0,100), category=(c.req.query('category')||'').slice(0,64), provider=(c.req.query('provider')||'quark').slice(0,30);
+  if(!selectedProviders(provider).length)return c.json({error:'不支持的网盘类型。'},400);
+  if(!q){const name=await siteName(c.env.DB,c.env.SITE_NAME);return c.html(layout('资源搜索',home([],[],0,'','',1,provider,[]),name,{canonical:c.env.SITE_ORIGIN?c.env.SITE_ORIGIN+'/':undefined}));}
   const page=Math.max(1,Math.min(10000,parseInt(c.req.query('page')||'1')||1));
-  const filters=["r.status='published'"], args:unknown[]=[];
-  if(category){filters.push('r.category_id=?');args.push(category);}
-  if(provider){filters.push("EXISTS(SELECT 1 FROM links l WHERE l.resource_id=r.id AND l.provider=? AND l.status='active')");args.push(provider);}
-  for(const term of q.split(/\s+/).filter(Boolean).slice(0,5)){filters.push("(r.title LIKE ? ESCAPE '\\' OR r.summary LIKE ? ESCAPE '\\' OR r.tags LIKE ? ESCAPE '\\')");const pattern='%'+term.replace(/[\\%_]/g,'\\$&')+'%';args.push(pattern,pattern,pattern);}
-  const where=filters.join(' AND ');
-  const [list,count,categories,name] = await Promise.all([
-    c.env.DB.prepare(`SELECT r.*,c.name category_name,l.id share_id,l.url share_url,l.code share_code FROM resources r LEFT JOIN categories c ON r.category_id=c.id LEFT JOIN links l ON l.id=(SELECT id FROM links WHERE resource_id=r.id AND provider='quark' AND status='active' ORDER BY position,id LIMIT 1) WHERE ${where} ORDER BY r.updated_at DESC,r.id LIMIT 12 OFFSET ?`).bind(...args,(page-1)*12).all<Resource>(),
-    c.env.DB.prepare(`SELECT count(*) n FROM resources r WHERE ${where}`).bind(...args).first<{n:number}>(),cats(c.env.DB),siteName(c.env.DB,c.env.SITE_NAME)
-  ]);
-  if(!count?.n&&page===1&&c.req.method==='GET'&&!category&&!provider){
+  const [local,name]=await Promise.all([localSearch(c.env.DB,q,provider,category,page),siteName(c.env.DB,c.env.SITE_NAME)]);
+  if(!local.total&&page===1&&c.req.method==='GET'&&!category){
     const keyword=q.replace(/\s+/g,' ').toLowerCase();
     await c.env.DB.prepare("INSERT INTO search_misses(keyword,count) VALUES(?,1) ON CONFLICT(keyword) DO UPDATE SET count=count+1,last_searched_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')").bind(keyword).run().catch(err=>console.error('Search tracking unavailable',err.message));
   }
-  return c.html(layout(q?`搜索：${q}`:'发现资源',home(list.results,categories,count?.n||0,q,category,page,provider),name,{noindex:!!q,canonical:!q&&!category&&!provider&&page===1&&c.env.SITE_ORIGIN?c.env.SITE_ORIGIN+'/':undefined}));
+  return c.html(layout(q?`搜索：${q}`:'发现资源',home(local.items,[],local.total,q,category,page,provider,page===1?local.missingProviders:[]),name,{noindex:!!q,canonical:!q&&!category&&!provider&&page===1&&c.env.SITE_ORIGIN?c.env.SITE_ORIGIN+'/':undefined}));
 });
 app.get('/r/:id',async c=>{
   const r=await c.env.DB.prepare(`${selectResource} WHERE r.id=? AND r.status='published'`).bind(c.req.param('id')).first<Resource>();
@@ -61,7 +56,7 @@ app.get('/media/:key',c=>c.notFound());
 app.get('/help',c=>c.redirect('/about',301));
 app.get('/about',async c=>{
   const name=await siteName(c.env.DB,c.env.SITE_NAME);
-  return c.html(layout('关于',`<article class="about-page prose"><a class="about-back" href="/">← 返回首页</a><h1>关于${e(name)}</h1><p>${e(name)}是一个夸克网盘资源分享站，整理学习资料、办公模板、设计素材、软件工具和 AI 教程，帮助你快速找到需要的内容。</p><h2>如何使用</h2><p>在首页搜索关键词，打开资源详情，按页面提示复制提取码、进入夸克网盘，保存到自己的账号。</p><h2>资源说明</h2><p>本站提供资源介绍和网盘分享链接，文件由网盘服务提供。分享链接可能失效，遇到问题可通过下方邮箱联系。标有“演示资料”的内容仅用于展示，没有真实下载链接。</p><p>请尊重创作者的版权，并遵守资源的使用许可。部分链接可能涉及网盘推广；网盘的保存、下载和收费规则以其页面说明为准。</p><h2>联系我</h2><p>资源建议、链接问题或版权反馈，请邮件联系，并附上相关资源页面和问题说明。</p><p><a class="about-email" href="mailto:dnboy985@gmail.com">dnboy985@gmail.com</a></p><h2>关于数据</h2><p>浏览本站无需注册。网站记录网盘入口的点击次数和来源渠道，资源需求仅用于补充内容；本站未命中的搜索词会记录次数和时间，供管理员完善资源库；同时记录被点击的网络资源标题、链接与时间，不记录搜索者身份。本站没有匹配结果时，会将搜索关键词发送到你启用的公开搜索来源；网络结果由外部来源提供，未逐一核实有效性。</p></article>`,name,{nav:'about',canonical:c.env.SITE_ORIGIN?`${c.env.SITE_ORIGIN}/about`:undefined}));
+  return c.html(layout('关于',`<article class="about-page prose"><a class="about-back" href="/">← 返回首页</a><h1>关于${e(name)}</h1><p>${e(name)}是一个网盘资源搜索站，整理学习资料、办公模板、设计素材、软件工具和 AI 教程，帮助你快速找到需要的内容。</p><h2>如何使用</h2><p>在首页选择网盘并搜索关键词，点击搜索结果进入对应网盘，保存到自己的账号。</p><h2>资源说明</h2><p>本站提供资源介绍和网盘分享链接，文件由网盘服务提供。分享链接可能失效，遇到问题可通过下方邮箱联系。标有“演示资料”的内容仅用于展示，没有真实下载链接。</p><p>请尊重创作者的版权，并遵守资源的使用许可。部分链接可能涉及网盘推广；网盘的保存、下载和收费规则以其页面说明为准。</p><h2>联系我</h2><p>资源建议、链接问题或版权反馈，请邮件联系，并附上相关资源页面和问题说明。</p><p><a class="about-email" href="mailto:dnboy985@gmail.com">dnboy985@gmail.com</a></p><h2>关于数据</h2><p>浏览本站无需注册。网站记录网盘入口的点击次数和来源渠道，资源需求仅用于补充内容；部分搜索词会记录次数和时间，用于完善资源库；同时记录被点击的网络资源标题、链接与时间，不记录搜索者身份。搜索时，关键词可能发送到你启用的公开搜索来源；网络结果由外部来源提供，未逐一核实有效性。</p></article>`,name,{nav:'about',canonical:c.env.SITE_ORIGIN?`${c.env.SITE_ORIGIN}/about`:undefined}));
 });
 app.get('/robots.txt',c=>c.text(`User-agent: *\nDisallow: /admin\nDisallow: /api/\nDisallow: /go/\n${c.env.SITE_ORIGIN?`Sitemap: ${c.env.SITE_ORIGIN}/sitemap.xml\n`:''}`));
 app.get('/sitemap.xml',async c=>{
@@ -89,18 +84,19 @@ app.get('/admin/preview/:id',async c=>{
   return c.html(layout('预览资源',detail(r,(await c.env.DB.prepare('SELECT * FROM links WHERE resource_id=? ORDER BY position').bind(r.id).all<Link>()).results,[],'direct',true),await siteName(c.env.DB,c.env.SITE_NAME),{noindex:true}));
 });
 
-type ResourceInput = {title:string;url:string};
+type ResourceInput = {title:string;url:string;provider:string};
 function parseResource(b:any):ResourceInput {
   if(!b||typeof b.title!=='string'||!b.title.trim()||b.title.trim().length>120)throw new Error('请填写 120 字以内的资源标题。');
-  if(typeof b.url!=='string'||b.url.length>2048||!validLink('quark',b.url.trim()))throw new Error('请填写夸克网盘的 HTTPS 分享链接。');
-  return {title:b.title.trim(),url:b.url.trim()};
+  const provider=typeof b.url==='string'&&b.url.length<=2048?identifyProvider(b.url.trim()):null;
+  if(!provider)throw new Error('请填写支持的网盘 HTTPS 分享链接。');
+  return {title:b.title.trim(),url:b.url.trim(),provider};
 }
 async function saveResource(db:D1Database,b:ResourceInput,id:string,existing:boolean) {
-  const link=existing?await db.prepare("SELECT id,code,url FROM links WHERE resource_id=? AND provider='quark' ORDER BY position,id LIMIT 1").bind(id).first<Link>():null;
+  const link=existing?await db.prepare("SELECT id,code,url FROM links WHERE resource_id=? ORDER BY position,id LIMIT 1").bind(id).first<Link>():null;
   const main=existing?db.prepare("UPDATE resources SET title=?,status='published',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?").bind(b.title,id):db.prepare("INSERT INTO resources(id,title,status) VALUES(?,?,'published')").bind(id,b.title);
   // Keep existing link IDs and extraction codes when editing the same URL.
-  const code=link?.url===b.url?link.code:'';
-  await db.batch([main,db.prepare("INSERT INTO links(id,resource_id,provider,url,code,status,position) VALUES(?,?,'quark',?,?,'active',0) ON CONFLICT(id) DO UPDATE SET url=excluded.url,code=excluded.code,status='active'").bind(link?.id||uid(),id,b.url,code)]);
+  const code=link?.url===b.url?link.code||extractionCode(b.url):extractionCode(b.url);
+  await db.batch([main,db.prepare("INSERT INTO links(id,resource_id,provider,url,code,status,position) VALUES(?,?,?,?,?,'active',0) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider,url=excluded.url,code=excluded.code,status='active'").bind(link?.id||uid(),id,b.provider,b.url,code)]);
 }
 app.post('/api/admin/resources',async c=>{try{const b=parseResource(await c.req.json());const id=uid();await saveResource(c.env.DB,b,id,false);return c.json({ok:true,id},201);}catch(err){return c.json({error:(err as Error).message},400);}});
 app.put('/api/admin/resources/:id',async c=>{try{const id=c.req.param('id');if(!await c.env.DB.prepare('SELECT id FROM resources WHERE id=?').bind(id).first())return c.json({error:'资源不存在。'},404);await saveResource(c.env.DB,parseResource(await c.req.json()),id,true);return c.json({ok:true,id});}catch(err){return c.json({error:(err as Error).message},400);}});
@@ -124,7 +120,7 @@ app.get('/api/admin/search-misses/export',async c=>{
 app.post('/api/network-click',async c=>{
  const b=await c.req.json().catch(()=>null);
  const click=await readClick(caches.default,c.req.url,b?.token,b?.index);
- if(!click||!validLink('quark',click.url))return c.json({error:'搜索记录已过期。'},400);
+ if(!click||!identifyProvider(click.url)||(click.provider&&!validLink(click.provider,click.url)))return c.json({error:'搜索记录已过期。'},400);
  await c.env.DB.batch([
    c.env.DB.prepare('INSERT INTO search_misses(keyword,count) VALUES(?,1) ON CONFLICT(keyword) DO NOTHING').bind(click.keyword),
    c.env.DB.prepare('INSERT INTO network_result_clicks(id,keyword,title,url) VALUES(?,?,?,?) ON CONFLICT(id) DO NOTHING').bind(click.id,click.keyword,click.title,click.url)
@@ -140,7 +136,7 @@ app.get('/admin/settings',async c=>{
   return c.html(layout('网站设置',adminHeading('网站设置','维护网站名称与联系信息。')+`<form id="settings-form" class="panel narrow"><label>网站名称<input name="site_name" required maxlength="30" value="${e(settings.site_name||c.env.SITE_NAME)}"></label><label>联系邮箱<input type="email" name="contact_email" maxlength="200" value="${e(settings.contact_email||'')}" placeholder="公开显示在使用帮助页"></label><button class="button primary">保存设置</button></form>`,await siteName(c.env.DB,c.env.SITE_NAME),adminOpts(c.env,'settings')));
 });
 app.put('/api/admin/settings',async c=>{const b=await c.req.json();if(typeof b.site_name!=='string'||!b.site_name.trim()||b.site_name.length>30||typeof b.contact_email!=='string'||b.contact_email.length>200||(b.contact_email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(b.contact_email)))return c.json({error:'请检查网站名称和邮箱格式。'},400);await c.env.DB.batch(['site_name','contact_email'].map(k=>c.env.DB.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(k,b[k].trim())));return c.json({ok:true});});
-app.get('/admin/data',async c=>c.html(layout('导入与备份',adminHeading('导入与备份','批量整理已有资源，保留一份自己的数据副本。')+`<div class="admin-two-col"><section class="panel"><h2>从 CSV 导入资源</h2><p class="muted">每次最多 15 条，先检查内容再确认导入。确认后直接发布。</p><a class="text-link" href="/api/admin/import-template">下载 CSV 模板 ↓</a><label>选择 CSV 文件<input id="csv-file" type="file" accept=".csv,text/csv"></label><p class="hint">列名：title（标题）、url（链接）。当前网盘类型为夸克。</p><div id="import-preview"></div><button class="button primary" id="confirm-import" hidden>确认导入并发布</button></section><section class="panel"><h2>导出网站数据</h2><p>导出资源、网盘链接、搜索记录、资源需求、点击统计和网站设置（包含历史数据）。</p><a class="button" href="/api/admin/export">下载 JSON 备份 ↓</a><p class="hint">当前不存储图片。JSON 可用于检查和迁移；完整数据库恢复请使用部署文档中的 D1 备份方式。</p><hr><h2>演示资料</h2><p class="muted">正式使用前，可以清空本地预置的演示资源。你自己发布的资源会保留。</p><button class="button" id="clear-demo">清空演示资料</button></section></div>`,await siteName(c.env.DB,c.env.SITE_NAME),adminOpts(c.env,'data'))));
+app.get('/admin/data',async c=>c.html(layout('导入与备份',adminHeading('导入与备份','批量整理已有资源，保留一份自己的数据副本。')+`<div class="admin-two-col"><section class="panel"><h2>从 CSV 导入资源</h2><p class="muted">每次最多 15 条，先检查内容再确认导入。确认后直接发布。</p><a class="text-link" href="/api/admin/import-template">下载 CSV 模板 ↓</a><label>选择 CSV 文件<input id="csv-file" type="file" accept=".csv,text/csv"></label><p class="hint">列名：title（标题）、url（链接）。自动识别网盘类型，无需增加列。</p><div id="import-preview"></div><button class="button primary" id="confirm-import" hidden>确认导入并发布</button></section><section class="panel"><h2>导出网站数据</h2><p>导出资源、网盘链接、搜索记录、资源需求、点击统计和网站设置（包含历史数据）。</p><a class="button" href="/api/admin/export">下载 JSON 备份 ↓</a><p class="hint">当前不存储图片。JSON 可用于检查和迁移；完整数据库恢复请使用部署文档中的 D1 备份方式。</p><hr><h2>演示资料</h2><p class="muted">正式使用前，可以清空本地预置的演示资源。你自己发布的资源会保留。</p><button class="button" id="clear-demo">清空演示资料</button></section></div>`,await siteName(c.env.DB,c.env.SITE_NAME),adminOpts(c.env,'data'))));
 app.get('/api/admin/import-template',c=>{c.header('Content-Type','text/csv;charset=utf-8');c.header('Content-Disposition','attachment; filename="resource-template.csv"');return c.body('\uFEFFtitle,url\r\n');});
 app.get('/api/admin/export',async c=>{
   const tables=['categories','resources','links','reports','resource_requests','search_misses','network_result_clicks','daily_clicks','settings'];const data:Record<string,unknown>={version:1,exported_at:new Date().toISOString()};
@@ -156,7 +152,7 @@ app.post('/api/admin/import',async c=>{
       inputs.push(parseResource(row));
     }
     if(b.confirm!==true)return c.json({ok:true,preview:inputs.map(r=>({title:r.title,url:r.url}))});
-    const statements:D1PreparedStatement[]=[];for(const r of inputs){const id=uid();statements.push(c.env.DB.prepare("INSERT INTO resources(id,title,status) VALUES(?,?,'published')").bind(id,r.title),c.env.DB.prepare("INSERT INTO links(id,resource_id,provider,url,code,status,position) VALUES(?,?,'quark',?,'','active',0)").bind(uid(),id,r.url));}
+    const statements:D1PreparedStatement[]=[];for(const r of inputs){const id=uid();statements.push(c.env.DB.prepare("INSERT INTO resources(id,title,status) VALUES(?,?,'published')").bind(id,r.title),c.env.DB.prepare("INSERT INTO links(id,resource_id,provider,url,code,status,position) VALUES(?,?,?,?,?,'active',0)").bind(uid(),id,r.provider,r.url,extractionCode(r.url)));}
     await c.env.DB.batch(statements);return c.json({ok:true,count:inputs.length});
   }catch(err){return c.json({error:(err as Error).message},400);}
 });
@@ -188,24 +184,26 @@ app.patch('/api/admin/requests/:id',async c=>{
 app.post('/api/network-search',async c=>{
  const b=await c.req.json().catch(()=>null);if(typeof b?.q!=='string'||!b.q.trim()||b.q.length>100||!Array.isArray(b.sources)||b.sources.length>searchSources.length||b.sources.some((id:unknown)=>!searchSources.some(s=>s.id===id)))return c.json({error:'请检查关键词和搜索来源。'},400);
  const q=b.q.trim(),ids=[...new Set<string>(b.sources)].sort();
- // Check local inventory again at request time, even when called directly.
- const args:string[]=[],filters=["status='published'"];
- for(const term of q.split(/\s+/).filter(Boolean).slice(0,5)){const p='%'+term.replace(/[\\%_]/g,'\\$&')+'%';filters.push("(title LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\')");args.push(p,p,p);}
- if(await c.env.DB.prepare('SELECT id FROM resources WHERE '+filters.join(' AND ')+' LIMIT 1').bind(...args).first())return c.json({local:true,items:[],sources:[]});
+ const provider=typeof b.provider==='string'?b.provider:'quark';
+ if((b.provider!==undefined&&typeof b.provider!=='string')||!selectedProviders(provider).length)return c.json({error:'不支持的网盘类型。'},400);
+ const category=typeof b.category==='string'?b.category.slice(0,64):'';
+ const inventory=await localSearch(c.env.DB,q,provider,category);
+ const missing=inventory.missingProviders;
+ if(!missing.length)return c.json({local:true,items:[],sources:[]});
  if(!ids.length)return c.json({local:false,items:[],sources:[],disabled:true});
  const window=Math.floor(Date.now()/600000),ip=c.req.header('CF-Connecting-IP')||'local';
  const hash=async(s:string)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))).map(x=>x.toString(16).padStart(2,'0')).join('');
  const rate=await c.env.DB.prepare('INSERT INTO report_limits(fingerprint,window,count) VALUES(?,?,1) ON CONFLICT(fingerprint) DO UPDATE SET count=count+1 RETURNING count').bind(await hash(`search:${window}:${ip}`),Math.floor(Date.now()/3600000)).first<{count:number}>();
  if((rate?.count||0)>30)return c.json({error:'搜索过于频繁，请稍后再试。'},429);
  c.executionCtx.waitUntil(c.env.DB.prepare('DELETE FROM report_limits WHERE window<?').bind(Math.floor(Date.now()/3600000)-2).run());
- const cache=caches.default,key=new Request(new URL('/_network-cache/'+await hash(JSON.stringify([q,ids,'pansou-v4-first-valid'])),c.req.url));
+ const cache=caches.default,key=new Request(new URL('/_network-cache/'+await hash(JSON.stringify([q,ids,missing,category,'pansou-v5-multi-drive'])),c.req.url));
  const tracked=async(data:any)=>{
    if(!data.items?.length)return c.json(data);
-   try{const clickToken=await issueClickToken(cache,c.req.url,{keyword:q.replace(/\s+/g,' ').toLowerCase(),items:data.items.map((item:any)=>({title:item.title,url:item.url}))});return c.json({...data,clickToken});}
+   try{const clickToken=await issueClickToken(cache,c.req.url,{keyword:q.replace(/\s+/g,' ').toLowerCase(),items:data.items.map((item:any)=>({title:item.title,url:item.url,provider:item.provider}))});return c.json({...data,clickToken});}
    catch(err){console.error('Click tracking unavailable');return c.json(data);}
  };
  const cached=await cache.match(key);if(cached)return tracked({...await cached.json<any>(),cached:true});
- const data={local:false,...await networkSearch(q,ids,c.env)};
+ const data={local:false,...await networkSearch(q,ids,c.env,missing)};
  if(data.items.length&&data.sources.every(s=>s.status==='ok'))c.executionCtx.waitUntil(cache.put(key,new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json','Cache-Control':'public,max-age=300'}})));
  return tracked(data);
 });

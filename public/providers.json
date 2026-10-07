@@ -1,0 +1,207 @@
+{
+  "quark": {
+    "label": "夸克网盘",
+    "hosts": [
+      "pan.quark.cn"
+    ],
+    "check": true,
+    "path": "^/s/[a-zA-Z0-9_-]+/?$",
+    "params": [
+      "pwd",
+      "password",
+      "pass_code",
+      "accessCode"
+    ],
+    "order": 0
+  },
+  "baidu": {
+    "label": "百度网盘",
+    "hosts": [
+      "pan.baidu.com",
+      "yun.baidu.com"
+    ],
+    "check": true,
+    "path": "^/s/[a-zA-Z0-9_-]+/?$",
+    "params": [
+      "pwd",
+      "password",
+      "pass_code",
+      "accessCode"
+    ],
+    "order": 1
+  },
+  "aliyun": {
+    "label": "阿里云盘",
+    "hosts": [
+      "alipan.com",
+      "www.alipan.com",
+      "aliyundrive.com",
+      "www.aliyundrive.com"
+    ],
+    "check": true,
+    "path": "^/s/[a-zA-Z0-9_-]+/?$",
+    "params": [
+      "pwd",
+      "password",
+      "pass_code",
+      "accessCode"
+    ],
+    "order": 2
+  },
+  "uc": {
+    "label": "UC 网盘",
+    "hosts": [
+      "drive.uc.cn"
+    ],
+    "check": true,
+    "path": "^/s/[a-zA-Z0-9_-]+/?$",
+    "params": [
+      "pwd",
+      "password",
+      "pass_code",
+      "accessCode"
+    ],
+    "order": 3
+  },
+  "xunlei": {
+    "label": "迅雷网盘",
+    "hosts": [
+      "pan.xunlei.com"
+    ],
+    "check": true,
+    "path": "^/s/[a-zA-Z0-9_-]+/?$",
+    "params": [
+      "pwd",
+      "password",
+      "pass_code",
+      "accessCode"
+    ],
+    "order": 4
+  },
+  "123": {
+    "label": "123 云盘",
+    "hosts": [
+      "123pan.com",
+      "www.123pan.com",
+      "123pan.cn",
+      "www.123pan.cn",
+      "123684.com",
+      "www.123684.com",
+      "123684.cn",
+      "www.123684.cn",
+      "123685.com",
+      "www.123685.com",
+      "123685.cn",
+      "www.123685.cn",
+      "123865.com",
+      "www.123865.com",
+      "123865.cn",
+      "www.123865.cn",
+      "123912.com",
+      "www.123912.com",
+      "123912.cn",
+      "www.123912.cn",
+      "123592.com",
+      "www.123592.com",
+      "123592.cn",
+      "www.123592.cn"
+    ],
+    "check": true,
+    "path": "^/s/[a-zA-Z0-9_-]+/?$",
+    "params": [
+      "pwd",
+      "password",
+      "pass_code",
+      "accessCode"
+    ],
+    "order": 5
+  },
+  "tianyi": {
+    "label": "天翼云盘",
+    "hosts": [
+      "cloud.189.cn"
+    ],
+    "check": true,
+    "path": "^/(t/[a-zA-Z0-9_-]+/?|web/share)$",
+    "params": [
+      "pwd",
+      "password",
+      "pass_code",
+      "accessCode",
+      "code"
+    ],
+    "order": 6
+  },
+  "mobile": {
+    "label": "移动云盘",
+    "hosts": [
+      "yun.139.com",
+      "www.yun.139.com",
+      "caiyun.139.com",
+      "www.caiyun.139.com",
+      "caiyun.feixin.10086.cn"
+    ],
+    "check": true,
+    "path": "^/(shareweb/?|w/i/[a-zA-Z0-9_-]+/?|m/i|[a-zA-Z0-9_-]+)$",
+    "params": [
+      "pwd",
+      "password",
+      "pass_code",
+      "accessCode",
+      "shareId",
+      "shareid",
+      "linkID"
+    ],
+    "hash": true,
+    "order": 7
+  },
+  "115": {
+    "label": "115 网盘",
+    "hosts": [
+      "115.com",
+      "115cdn.com",
+      "anxia.com"
+    ],
+    "check": true,
+    "path": "^/s/[a-zA-Z0-9_-]+/?$",
+    "params": [
+      "pwd",
+      "password",
+      "pass_code",
+      "accessCode"
+    ],
+    "hash": true,
+    "order": 8
+  },
+  "pikpak": {
+    "label": "PikPak",
+    "hosts": [
+      "mypikpak.com"
+    ],
+    "check": false,
+    "path": "^/s/[a-zA-Z0-9_-]+/?$",
+    "params": [
+      "pwd",
+      "password",
+      "pass_code",
+      "accessCode"
+    ],
+    "order": 9
+  },
+  "guangya": {
+    "label": "光鸭云盘",
+    "hosts": [
+      "guangyapan.com",
+      "www.guangyapan.com"
+    ],
+    "check": false,
+    "path": "^/s/[a-zA-Z0-9_-]+/?$",
+    "params": [
+      "pwd",
+      "password",
+      "pass_code",
+      "accessCode"
+    ],
+    "order": 10
+  }
+}

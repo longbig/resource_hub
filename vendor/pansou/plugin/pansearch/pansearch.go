@@ -578,7 +578,7 @@ func (p *PanSearchAsyncPlugin) doSearch(client *http.Client, keyword string, ext
 // fetchFirstPage 获取第一页结果和总数
 func (p *PanSearchAsyncPlugin) fetchFirstPage(keyword string, baseURL string, client *http.Client) ([]PanSearchItem, int, error) {
 	// 构建请求URL
-	reqURL := fmt.Sprintf("%s?keyword=%s&pan=quark&offset=0", baseURL, url.QueryEscape(keyword))
+	reqURL := fmt.Sprintf("%s?keyword=%s&offset=0", baseURL, url.QueryEscape(keyword))
 
 	// 创建带超时的上下文
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
@@ -637,7 +637,7 @@ func (p *PanSearchAsyncPlugin) fetchFirstPage(keyword string, baseURL string, cl
 // fetchPage 获取指定偏移量的页面
 func (p *PanSearchAsyncPlugin) fetchPage(keyword string, offset int, baseURL string, client *http.Client) ([]PanSearchItem, error) {
 	// 构建请求URL
-	reqURL := fmt.Sprintf("%s?keyword=%s&pan=quark&offset=%d", baseURL, url.QueryEscape(keyword), offset)
+	reqURL := fmt.Sprintf("%s?keyword=%s&offset=%d", baseURL, url.QueryEscape(keyword), offset)
 
 	// 创建带超时的上下文
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
@@ -831,7 +831,7 @@ func normalizePanSearchType(rawType string, rawURL string) string {
 	switch normalized {
 	case "ali", "alipan", "aliyun", "aliyundrive":
 		return "aliyun"
-	case "quark", "uc", "baidu", "xunlei", "tianyi", "115", "123", "mobile", "pikpak":
+	case "quark", "uc", "baidu", "xunlei", "tianyi", "115", "123", "mobile", "pikpak", "guangya":
 		return normalized
 	}
 
@@ -849,12 +849,14 @@ func normalizePanSearchType(rawType string, rawURL string) string {
 		return "xunlei"
 	case strings.Contains(lowerURL, "cloud.189.cn"):
 		return "tianyi"
-	case strings.Contains(lowerURL, "115.com"):
+	case strings.Contains(lowerURL, "115.com"), strings.Contains(lowerURL, "115cdn.com"), strings.Contains(lowerURL, "anxia.com"):
 		return "115"
 	case strings.Contains(lowerURL, "123pan"), strings.Contains(lowerURL, "123865.com"), strings.Contains(lowerURL, "123684.com"):
 		return "123"
 	case strings.Contains(lowerURL, "139.com"), strings.Contains(lowerURL, "10086.cn"):
 		return "mobile"
+	case strings.Contains(lowerURL, "guangyapan.com"):
+		return "guangya"
 	case strings.Contains(lowerURL, "pikpak"):
 		return "pikpak"
 	default:

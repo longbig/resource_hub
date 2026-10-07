@@ -2,20 +2,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import type { MiddlewareHandler } from 'hono';
 import type { AppEnv } from './types';
 
-export const providerCatalog: Record<string, { label: string; hosts: string[] }> = {
-  quark: { label: '夸克网盘', hosts: ['pan.quark.cn'] },
-  baidu: { label: '百度网盘', hosts: ['pan.baidu.com', 'yun.baidu.com'] },
-  aliyun: { label: '阿里云盘', hosts: ['www.alipan.com', 'www.aliyundrive.com', 'alipan.com'] },
-  uc: { label: 'UC 网盘', hosts: ['drive.uc.cn'] },
-  xunlei: { label: '迅雷网盘', hosts: ['pan.xunlei.com'] },
-  '123': { label: '123 云盘', hosts: ['www.123pan.com', 'www.123pan.cn', 'www.123684.com', 'www.123865.com', 'www.123912.com', 'www.123pan.cn'] },
-};
-// Add another catalog key here when its link flow has been verified.
-export const enabledProviderIds = ['quark'];
-export const providers = Object.fromEntries(enabledProviderIds.map(id => [id, providerCatalog[id]]));
-export function validLink(provider: string, raw: string): boolean {
-  try { const url = new URL(raw); return url.protocol === 'https:' && !url.username && !url.password && !url.port && !!providers[provider]?.hosts.includes(url.hostname); } catch { return false; }
-}
+export { providerCatalog, enabledProviderIds, providers, validLink } from './providers';
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 export const adminAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   const hostname = new URL(c.req.url).hostname;

@@ -3,6 +3,8 @@ package pansearch
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -90,5 +92,35 @@ func TestWorkerPoolRejectsSubmissionsAfterClose(t *testing.T) {
 
 	if ok := pool.Submit(Task{offset: 1}); ok {
 		t.Fatal("expected submit after close to fail")
+	}
+}
+
+// The source must not silently remain locked to Quark when the website switches drives.
+func TestPanSearchRequestsDoNotForceQuark(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("pan") != "" {
+			t.Errorf("unexpected forced drive: %s", r.URL.Query().Get("pan"))
+		}
+		if r.URL.Query().Get("keyword") != "Python" {
+			t.Errorf("keyword missing: %s", r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"pageProps":{"data":{"total":0,"data":[]}}}`)
+	}))
+	defer server.Close()
+	p := &PanSearchAsyncPlugin{timeout: time.Second}
+	if _, _, err := p.fetchFirstPage("Python", server.URL, server.Client()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.fetchPage("Python", 10, server.URL, server.Client()); err != nil {
+		t.Fatal(err)
+	}
+	for _, domain := range []string{"115cdn.com", "anxia.com"} {
+		if normalizePanSearchType("", "https://"+domain+"/s/abc") != "115" {
+			t.Fatal("115 alias missing")
+		}
+	}
+	if normalizePanSearchType("", "https://guangyapan.com/s/abc") != "guangya" {
+		t.Fatal("Guangya missing")
 	}
 }

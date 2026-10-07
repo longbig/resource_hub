@@ -9,7 +9,7 @@ export type Resource = {
   id: string; title: string; summary: string; body: string; category_id: string | null;
   category_name?: string; tags: string; cover_key: string; format: string; size: string;
   status: 'draft' | 'published' | 'archived'; featured: number; demo: number;
-  created_at: string; updated_at: string; clicks?: number; share_id?:string; share_url?:string; share_code?:string;
+  created_at: string; updated_at: string; clicks?: number; share_id?:string; share_url?:string; share_code?:string; share_provider?:string;
 };
 export type Link = { id: string; resource_id: string; provider: string; url: string; code: string; status: string; position: number };
 export type AppEnv = { Bindings: Bindings; Variables: { admin: string } };
