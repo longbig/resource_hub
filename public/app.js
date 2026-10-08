@@ -14,6 +14,27 @@ let dirty=false;
 const resourceForm=$('#resource-form');
 function markDirty(){dirty=true;$('#form-status').textContent='有未保存的修改';}
 resourceForm?.addEventListener('input',markDirty);
+if(resourceForm){
+ const shareText=$('#share-text'),shareStatus=$('#share-status');
+ let parser;
+ async function fillShare(text){
+  try{
+   const {parseQuarkShare}=await (parser||=import('/share-text.js')); if(shareText.value!==text)return;
+   const parsed=parseQuarkShare(text);
+   if(!parsed){shareStatus.textContent=text.trim()?'未识别到夸克分享链接，请检查文案或手动填写。':'粘贴后自动填入标题和链接，确认后再发布。';return;}
+   if(parsed.title)resourceForm.elements.title.value=parsed.title;
+   resourceForm.elements.url.value=parsed.url;markDirty();
+   shareStatus.textContent=parsed.title?'已识别标题和链接，请确认后发布。':'已识别链接，请补充或确认资源标题。';
+   if(parsed.title.length>120)shareStatus.textContent='已识别标题和链接，标题超过 120 字，请缩短后发布。';
+  }catch(error){shareStatus.textContent=error.message||'识别失败，请手动填写标题和链接。';}
+ }
+ shareText.addEventListener('input',()=>fillShare(shareText.value));
+ // Pasting the native message into either existing field works too.
+ for(const field of [resourceForm.elements.title,resourceForm.elements.url])field.addEventListener('paste',event=>{
+  const text=event.clipboardData?.getData('text/plain');
+  if(text&&/夸克网盘分享了/.test(text)){event.preventDefault();shareText.value=text;markDirty();fillShare(text);}
+ });
+}
 window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
 resourceForm?.addEventListener('submit',event=>{event.preventDefault();busy($('button[type=submit]',resourceForm),async()=>{const data=Object.fromEntries(new FormData(resourceForm));const id=resourceForm.dataset.id;const result=await api('/api/admin/resources'+(id?'/'+id:''),id?'PUT':'POST',data);dirty=false;toast('资源已发布');$('#form-status').textContent='保存成功';if(!id)location.href='/admin/edit/'+result.id;});});
 $('#settings-form')?.addEventListener('submit',event=>{event.preventDefault();busy($('button',event.target),async()=>{await api('/api/admin/settings','PUT',Object.fromEntries(new FormData(event.target)));toast('设置已保存');location.reload();});});
