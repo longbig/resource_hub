@@ -29,7 +29,7 @@ test('简化后台、发布与搜索记录',async t=>{
   assert.ok(!(await backup()).search_misses.some(r=>r.keyword===seed.title.toLowerCase()));
   assert.equal((await request('/r/'+id)).status,200);
   const go=await request('/go/'+linkId+'?url=https://evil.example');assert.equal(go.status,302);assert.equal(go.headers.get('location'),seed.url);
-  const local=await (await request('/api/network-search','POST',{q:seed.title,provider:'quark',sources:['pansearch']})).json();assert.equal(local.local,true);
+  const local=await (await request('/api/network-search','POST',{q:seed.title,provider:'quark',sources:['pansearch']})).json();assert.equal(local.local,false);assert.equal(local.sources.length,1);assert.equal(local.clickToken,undefined);
  });
  await t.test('修改链接保留跳转编号',async()=>{
   const url=seed.url+'-updated';assert.equal((await request('/api/admin/resources/'+id,'PUT',{...seed,url})).status,200);
@@ -58,9 +58,9 @@ test('简化后台、发布与搜索记录',async t=>{
   const response=await request('/api/admin/resources','POST',{title,url:'https://pan.baidu.com/s/otherdrive?pwd=abcd'});assert.equal(response.status,201);
   const id=(await response.json()).id;created.push(id);
   let link=(await backup()).links.find(l=>l.resource_id===id);assert.equal(link.provider,'baidu');assert.equal(link.code,'abcd');
-  const html=await (await request('/?q='+title+'&provider=baidu')).text();assert.ok(html.includes('/go/'+link.id));assert.ok(!html.includes('id="network-results"'));
+  const html=await (await request('/?q='+title+'&provider=baidu')).text();assert.ok(html.includes('/go/'+link.id));assert.ok(html.includes('id="network-results"'));assert.ok(html.indexOf('/go/'+link.id)<html.indexOf('id="network-results"'));
   const all=await (await request('/?q='+title+'&provider=all')).text();assert.ok(all.includes('/go/'+link.id));assert.ok(all.includes('id="network-results"'));
-  const own=await (await request('/api/network-search','POST',{q:title,provider:'baidu',sources:[]})).json();assert.equal(own.local,true);
+  const own=await (await request('/api/network-search','POST',{q:title,provider:'baidu',sources:[]})).json();assert.equal(own.local,false);assert.equal(own.disabled,true);
   const other=await (await request('/api/network-search','POST',{q:title,provider:'quark',sources:[]})).json();assert.equal(other.local,false);
   const mixed=await (await request('/api/network-search','POST',{q:title,provider:'all',sources:[]})).json();assert.equal(mixed.local,false);
   assert.equal((await request('/api/network-search','POST',{q:title,provider:'unknown',sources:[]})).status,400);

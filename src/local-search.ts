@@ -1,7 +1,7 @@
 import { selectedProviders } from './providers';
 import type {Resource} from './types';
-// Shared by the page and API so fallback always uses the corresponding local drive inventory.
-export async function localSearch(db:D1Database,q:string,provider='',category='',page=1) {
+// Shared inventory for rendering, deduplication and missed-search tracking.
+export async function localSearch(db:D1Database,q:string,provider='',category='',page=1,includeLinks=false) {
   const ids=selectedProviders(provider),filters=["r.status='published'","l.status='active'",`l.provider IN (${ids.map(()=>'?').join(',')})`];
   const args:unknown[]=[...ids];
   if(category){filters.push('r.category_id=?');args.push(category);}
@@ -11,9 +11,10 @@ export async function localSearch(db:D1Database,q:string,provider='',category=''
   }
   filters.push("l.id=(SELECT id FROM links WHERE resource_id=r.id AND provider=l.provider AND status='active' ORDER BY position,id LIMIT 1)");
   const from=' FROM resources r JOIN links l ON l.resource_id=r.id LEFT JOIN categories c ON r.category_id=c.id WHERE '+filters.join(' AND ');
-  const [list,counts]=await Promise.all([
+  const [list,counts,links]=await Promise.all([
     db.prepare('SELECT r.*,c.name category_name,l.id share_id,l.url share_url,l.code share_code,l.provider share_provider'+from+' ORDER BY r.updated_at DESC,r.id,l.provider LIMIT 12 OFFSET ?').bind(...args,(page-1)*12).all<Resource>(),
-    db.prepare('SELECT l.provider,count(*) n'+from+' GROUP BY l.provider').bind(...args).all<{provider:string;n:number}>()
+    db.prepare('SELECT l.provider,count(*) n'+from+' GROUP BY l.provider').bind(...args).all<{provider:string;n:number}>(),
+    includeLinks?db.prepare('SELECT l.provider,l.url'+from).bind(...args).all<{provider:string;url:string}>():Promise.resolve({results:[]})
   ]);
-  return {items:list.results,total:counts.results.reduce((n,r)=>n+r.n,0),missingProviders:ids.filter(id=>!counts.results.some(r=>r.provider===id))};
+  return {items:list.results,total:counts.results.reduce((n,r)=>n+r.n,0),links:links.results,missingProviders:ids.filter(id=>!counts.results.some(r=>r.provider===id))};
 }

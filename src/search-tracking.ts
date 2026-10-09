@@ -1,5 +1,5 @@
 // Only server-issued results can be recorded; clients never supply titles or URLs.
-export type ClickResults = {keyword:string;items:Array<{title:string;url:string;provider?:string}>};
+export type ClickResults = {keyword:string;items:Array<{title:string;url:string;provider?:string;trackMiss?:boolean}>};
 const key=(origin:string,token:string)=>new Request(new URL('/_click-results/'+token,origin));
 export async function issueClickToken(cache:Cache,origin:string,data:ClickResults){
   const token=crypto.randomUUID();

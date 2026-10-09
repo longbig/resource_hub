@@ -15,6 +15,16 @@ test('CSV 正确处理引号、换行和表格公式',()=>{
  assert.equal(csvCell('教程,"Excel"\n第二行'),'"教程,""Excel""\n第二行"');
  assert.equal(csvCell('=1+1'),'"\'=1+1"');assert.equal(csvCell(' +1'),'"\' +1"');assert.equal(csvCell(null),'""');
 });
+test('组合结果的未命中记录资格由服务器凭据决定，保留原始结果序号',async()=>{
+ const entries=new Map();const cache={put:async(k,v)=>entries.set(k.url,v),match:async k=>entries.get(k.url)?.clone()};
+ const origin='https://example.com';const data={keyword:'python',items:[
+  {title:'已有网盘的其他结果',url:'https://pan.quark.cn/s/abc',provider:'quark',trackMiss:false},
+  {title:'未命中网盘的结果',url:'https://pan.baidu.com/s/def',provider:'baidu',trackMiss:true}
+ ]};
+ const token=await issueClickToken(cache,origin,data);
+ assert.equal((await readClick(cache,origin,token,0)).trackMiss,false);
+ assert.equal((await readClick(cache,origin,token,1)).trackMiss,true);
+});
 test('后台导出完整 CSV，点击接口拒绝伪造及跨站请求',async()=>{
  const base=process.env.TEST_ORIGIN||'http://127.0.0.1:8787';
  const response=await fetch(base+'/api/admin/search-misses/export');assert.equal(response.status,200);assert.match(response.headers.get('content-disposition'),/attachment/);const csv=await response.text();assert.match(csv,/搜索词/);assert.match(csv,/点击的资源标题/);

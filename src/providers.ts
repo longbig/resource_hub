@@ -31,6 +31,7 @@ export function shareUrl(provider:string,raw:string):string|null {
 }
 export function shareIdentity(provider:string,raw:string):string {
   const u=new URL(raw);for(const key of ['pwd','password','pass_code','accessCode'])u.searchParams.delete(key);
+  u.pathname=u.pathname.replace(/\/$/,'');
   // Aliases of a provider should identify the same share, but different providers must stay separate.
   return provider+':'+u.pathname+u.search+u.hash.replace(/[?#&](?:password|pwd)=[^&]*/g,'');
 }

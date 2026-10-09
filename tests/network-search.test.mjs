@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 const bundled=await build({entryPoints:['src/network-search.ts'],bundle:true,write:false,platform:'node',format:'esm'});
-const {parsePanSou,pansouBody,quarkUrl,networkSearch,promoteFirstValid,verifyFirstResult}=await import('data:text/javascript;base64,'+Buffer.from(bundled.outputFiles[0].text).toString('base64'));
+const {parsePanSou,pansouBody,quarkUrl,networkSearch,promoteFirstValid,verifyFirstResult,excludeLocalShares}=await import('data:text/javascript;base64,'+Buffer.from(bundled.outputFiles[0].text).toString('base64'));
 const envelope=rows=>({code:0,data:{total:rows.length,merged_by_type:{quark:rows}}});
 const row={url:'https://pan.quark.cn/s/abc123',note:'Python 入门教程',source:'plugin:pansearch',password:''};
 test('网络来源选择不会意外启用全部插件或频道',()=>{
@@ -80,4 +80,35 @@ test('多网盘有效性检测使用对应 disk_type，不支持检测的网盘�
  }}}}};
  const items=[{...candidates[0],provider:'pikpak',url:'https://mypikpak.com/s/abc'}, {...candidates[1],provider:'baidu',url:'https://pan.baidu.com/s/xyz'},candidates[2]];
  assert.deepEqual((await verifyFirstResult(items,env)).map(i=>i.provider),['baidu','pikpak','quark']);assert.deepEqual(calls,['baidu']);
+});
+test('网络搜索在有本站资源时仍返回其他结果，重复链接不占用首条有效检测',async()=>{
+ const calls=[];
+ const env={ENVIRONMENT:'production',PANSOU_CONTAINER:{getByName(){return {async fetch(url,init){
+  const body=JSON.parse(init.body);calls.push({url,body});
+  if(url.endsWith('/api/search'))return Response.json(envelope([
+   {...row,url:row.url+'?pwd=abcd',datetime:'2026-10-09T00:00:00Z'},
+   {...row,url:'https://pan.quark.cn/s/second',datetime:'2026-10-08T00:00:00Z'},
+   {...row,url:'https://pan.quark.cn/s/third',datetime:'2026-10-07T00:00:00Z'}
+  ]));
+  return Response.json({results:body.items.map(item=>({...item,state:'ok'}))});
+ }}}}};
+ const result=await networkSearch('Python',['pansearch'],env,['quark'],[{provider:'quark',url:row.url+'?from=wechat'}]);
+ assert.deepEqual(result.items.map(i=>i.url),['https://pan.quark.cn/s/second','https://pan.quark.cn/s/third']);
+ assert.deepEqual(calls[0].body.cloud_types,['quark']);assert.equal(calls.length,2);assert.equal(calls[1].body.items[0].url,result.items[0].url);
+});
+test('跨本站与网络去重识别别名和提取码，同时保留不同网盘与不同移动分享',()=>{
+ const items=[
+  {...candidates[0],provider:'aliyun',url:'https://www.alipan.com/s/same'},
+  {...candidates[1],provider:'quark',url:'https://pan.quark.cn/s/same'},
+  {...candidates[2],provider:'mobile',url:'https://yun.139.com/shareweb/#/w/i/AAA'},
+  {...candidates[3],provider:'mobile',url:'https://yun.139.com/shareweb/#/w/i/BBB'}
+ ];
+ const result=excludeLocalShares(items,[{provider:'aliyun',url:'https://aliyundrive.com/s/same?pwd=abcd'},{provider:'mobile',url:items[2].url}]);
+ assert.deepEqual(result,[items[1],items[3]]);
+});
+test('先剔除本站重复链接再限制数量，仍可补足 60 条其他网络结果',()=>{
+ const rows=Array.from({length:65},(_,i)=>({...row,url:'https://pan.quark.cn/s/share'+String(i).padStart(2,'0')}));
+ const own=rows.slice(0,5).map(r=>({provider:'quark',url:r.url}));
+ const items=parsePanSou(envelope(rows),'Python',['pansearch'],['quark'],own);
+ assert.equal(items.length,60);assert.equal(items[0].url,rows[5].url);assert.equal(items.at(-1).url,rows.at(-1).url);
 });

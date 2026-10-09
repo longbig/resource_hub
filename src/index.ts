@@ -1,7 +1,7 @@
 import { issueClickToken, readClick, csvCell } from './search-tracking';
 export { PanSouContainer } from './pansou-container';
 import { searchSources, networkSearch } from './network-search';
-import { identifyProvider, selectedProviders, extractionCode } from './providers';
+import { identifyProvider, selectedProviders, extractionCode, shareIdentity } from './providers';
 import { localSearch } from './local-search';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -37,7 +37,7 @@ app.get('/',async c=>{
     const keyword=q.replace(/\s+/g,' ').toLowerCase();
     await c.env.DB.prepare("INSERT INTO search_misses(keyword,count) VALUES(?,1) ON CONFLICT(keyword) DO UPDATE SET count=count+1,last_searched_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')").bind(keyword).run().catch(err=>console.error('Search tracking unavailable',err.message));
   }
-  return c.html(layout(q?`搜索：${q}`:'发现资源',home(local.items,[],local.total,q,category,page,provider,page===1?local.missingProviders:[]),name,{noindex:!!q,canonical:!q&&!category&&!provider&&page===1&&c.env.SITE_ORIGIN?c.env.SITE_ORIGIN+'/':undefined}));
+  return c.html(layout(q?`搜索：${q}`:'发现资源',home(local.items,[],local.total,q,category,page,provider,selectedProviders(provider)),name,{noindex:!!q,canonical:!q&&!category&&!provider&&page===1&&c.env.SITE_ORIGIN?c.env.SITE_ORIGIN+'/':undefined}));
 });
 app.get('/r/:id',async c=>{
   const r=await c.env.DB.prepare(`${selectResource} WHERE r.id=? AND r.status='published'`).bind(c.req.param('id')).first<Resource>();
@@ -121,6 +121,7 @@ app.post('/api/network-click',async c=>{
  const b=await c.req.json().catch(()=>null);
  const click=await readClick(caches.default,c.req.url,b?.token,b?.index);
  if(!click||!identifyProvider(click.url)||(click.provider&&!validLink(click.provider,click.url)))return c.json({error:'搜索记录已过期。'},400);
+ if(click.trackMiss===false)return c.json({ok:true});
  await c.env.DB.batch([
    c.env.DB.prepare('INSERT INTO search_misses(keyword,count) VALUES(?,1) ON CONFLICT(keyword) DO NOTHING').bind(click.keyword),
    c.env.DB.prepare('INSERT INTO network_result_clicks(id,keyword,title,url) VALUES(?,?,?,?) ON CONFLICT(id) DO NOTHING').bind(click.id,click.keyword,click.title,click.url)
@@ -187,23 +188,24 @@ app.post('/api/network-search',async c=>{
  const provider=typeof b.provider==='string'?b.provider:'quark';
  if((b.provider!==undefined&&typeof b.provider!=='string')||!selectedProviders(provider).length)return c.json({error:'不支持的网盘类型。'},400);
  const category=typeof b.category==='string'?b.category.slice(0,64):'';
- const inventory=await localSearch(c.env.DB,q,provider,category);
+ const inventory=await localSearch(c.env.DB,q,provider,category,1,true);
+ const cloudTypes=selectedProviders(provider);
  const missing=inventory.missingProviders;
- if(!missing.length)return c.json({local:true,items:[],sources:[]});
  if(!ids.length)return c.json({local:false,items:[],sources:[],disabled:true});
  const window=Math.floor(Date.now()/600000),ip=c.req.header('CF-Connecting-IP')||'local';
  const hash=async(s:string)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))).map(x=>x.toString(16).padStart(2,'0')).join('');
  const rate=await c.env.DB.prepare('INSERT INTO report_limits(fingerprint,window,count) VALUES(?,?,1) ON CONFLICT(fingerprint) DO UPDATE SET count=count+1 RETURNING count').bind(await hash(`search:${window}:${ip}`),Math.floor(Date.now()/3600000)).first<{count:number}>();
  if((rate?.count||0)>30)return c.json({error:'搜索过于频繁，请稍后再试。'},429);
  c.executionCtx.waitUntil(c.env.DB.prepare('DELETE FROM report_limits WHERE window<?').bind(Math.floor(Date.now()/3600000)-2).run());
- const cache=caches.default,key=new Request(new URL('/_network-cache/'+await hash(JSON.stringify([q,ids,missing,category,'pansou-v5-multi-drive'])),c.req.url));
+ const localKeys=inventory.links.map(link=>shareIdentity(link.provider,link.url)).sort();
+ const cache=caches.default,key=new Request(new URL('/_network-cache/'+await hash(JSON.stringify([q,ids,cloudTypes,localKeys,category,'pansou-v6-combined'])),c.req.url));
  const tracked=async(data:any)=>{
-   if(!data.items?.length)return c.json(data);
-   try{const clickToken=await issueClickToken(cache,c.req.url,{keyword:q.replace(/\s+/g,' ').toLowerCase(),items:data.items.map((item:any)=>({title:item.title,url:item.url,provider:item.provider}))});return c.json({...data,clickToken});}
+   if(!data.items?.length||!data.items.some((item:any)=>missing.includes(item.provider)))return c.json(data);
+   try{const clickToken=await issueClickToken(cache,c.req.url,{keyword:q.replace(/\s+/g,' ').toLowerCase(),items:data.items.map((item:any)=>({title:item.title,url:item.url,provider:item.provider,trackMiss:missing.includes(item.provider)}))});return c.json({...data,clickToken});}
    catch(err){console.error('Click tracking unavailable');return c.json(data);}
  };
  const cached=await cache.match(key);if(cached)return tracked({...await cached.json<any>(),cached:true});
- const data={local:false,...await networkSearch(q,ids,c.env,missing)};
+ const data={local:false,...await networkSearch(q,ids,c.env,cloudTypes,inventory.links)};
  if(data.items.length&&data.sources.every(s=>s.status==='ok'))c.executionCtx.waitUntil(cache.put(key,new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json','Cache-Control':'public,max-age=300'}})));
  return tracked(data);
 });

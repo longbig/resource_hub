@@ -16,11 +16,16 @@ export function deduplicate(items:NetworkItem[]):NetworkItem[]{
  const sorted=[...items].sort((a,b)=>(Date.parse(b.datetime)||0)-(Date.parse(a.datetime)||0)||a.url.localeCompare(b.url));
  const seen=new Map<string,NetworkItem>();for(const item of sorted){const key=shareIdentity(item.provider,item.url),prior=seen.get(key);if(!prior)seen.set(key,{...item});else if(!prior.code&&item.code){prior.code=item.code;prior.url=item.url;}}return [...seen.values()].slice(0,60);
 }
+export function excludeLocalShares(items:NetworkItem[],links:Array<{provider:string;url:string}>):NetworkItem[]{
+ const seen=new Set<string>();
+ for(const link of links){const url=shareUrl(link.provider,link.url);if(url)seen.add(shareIdentity(link.provider,url));}
+ return items.filter(item=>!seen.has(shareIdentity(item.provider,item.url)));
+}
 export function pansouBody(q:string,ids:string[],cloudTypes:string[]=enabledProviderIds){
  const selected=searchSources.filter(s=>ids.includes(s.id)),plugins=selected.filter(s=>s.kind==='plugin').map(s=>s.id),channels=selected.filter(s=>s.kind==='channel').map(s=>s.id);
  return {kw:q,res:'all',src:plugins.length?(channels.length?'all':'plugin'):'tg',plugins,channels,cloud_types:cloudTypes,conc:5};
 }
-export function parsePanSou(payload:unknown,q:string,ids:string[],cloudTypes:string[]=enabledProviderIds):NetworkItem[]{
+export function parsePanSou(payload:unknown,q:string,ids:string[],cloudTypes:string[]=enabledProviderIds,localLinks:Array<{provider:string;url:string}>=[]):NetworkItem[]{
  if(!payload||typeof payload!=='object')throw Error('invalid response');
  const envelope=payload as {code?:number;data?:{total?:number;results?:Array<{content?:string;links?:Array<{url?:string}>}>;merged_by_type?:Record<string,unknown[]>}};
  if(envelope.code!==0||!envelope.data||typeof envelope.data.total!=='number')throw Error('invalid response');
@@ -39,7 +44,7 @@ export function parsePanSou(payload:unknown,q:string,ids:string[],cloudTypes:str
    items.push({provider,datetime:normalizedDate(row.datetime),title:(note.split('\n').find(t=>t.trim())||q).slice(0,100),summary:description.replace(/https?:\/\/\S+/g,'').replace(/\s+/g,' ').slice(0,220),url,code,source:entry.label,sourceUrl:entry.kind==='channel'?'https://t.me/s/'+entry.id:entry.id==='pansearch'?'https://www.pansearch.me/search?'+new URLSearchParams({keyword:q,pan:provider}):''});
   }
  }
- return deduplicate(items);
+ return deduplicate(excludeLocalShares(items,localLinks));
 }
 async function boundedJson(response:Response):Promise<unknown>{
  if(!response.ok||!response.body)throw Error('PanSou unavailable');const reader=response.body.getReader();const chunks:Uint8Array[]=[];let size=0;
@@ -78,12 +83,12 @@ export async function verifyFirstResult(items:NetworkItem[],env:Bindings):Promis
   })(),expired]);}finally{if(timer!==undefined)clearTimeout(timer);}
  },()=>Date.now()<deadline);
 }
-export async function networkSearch(q:string,ids:string[],env:Bindings,cloudTypes:string[]=enabledProviderIds){
+export async function networkSearch(q:string,ids:string[],env:Bindings,cloudTypes:string[]=enabledProviderIds,localLinks:Array<{provider:string;url:string}>=[]){
  const selected=searchSources.filter(s=>ids.includes(s.id));if(!selected.length||!cloudTypes.length)return {items:[],sources:[]};
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),25000);
  try{const init:RequestInit={method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pansouBody(q,ids,cloudTypes)),signal:controller.signal};
  const response=env.ENVIRONMENT==='local'?await fetch('http://127.0.0.1:8888/api/search',init):await env.PANSOU_CONTAINER!.getByName('search').fetch('http://pansou/api/search',init);
- const parsed=parsePanSou(await boundedJson(response),q,ids,cloudTypes);
+ const parsed=parsePanSou(await boundedJson(response),q,ids,cloudTypes,localLinks);
  clearTimeout(timer);
  const items=await verifyFirstResult(parsed,env);
  return {items,sources:selected.map(s=>({id:s.id,label:s.label,status:'ok',count:items.filter(i=>i.source===s.label).length} as SourceResult))};
