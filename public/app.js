@@ -66,7 +66,7 @@ function textNode(tag,text,className){const el=document.createElement(tag);el.te
 async function loadNetwork(){
  const root=$('#network-results');if(!root)return;const run=++networkRun;
  root.replaceChildren(textNode('p','搜索中…','muted'));
- try{const catalog=await loadProviders();const data=await api('/api/network-search','POST',{q:root.dataset.query,provider:root.dataset.provider,category:root.dataset.category,sources:sourceBoxes.filter(b=>b.checked).map(b=>b.dataset.searchSource)});if(run!==networkRun)return;
+ try{const catalog=await loadProviders();const data=await api('/api/network-search','POST',{q:root.dataset.query,provider:root.dataset.provider,category:root.dataset.category,page:Number(root.dataset.page||1),sources:sourceBoxes.filter(b=>b.checked).map(b=>b.dataset.searchSource)});if(run!==networkRun)return;
  const failures=data.sources.filter(s=>s.status==='error');root.replaceChildren();
  const heading=root.closest('section').querySelector('h2');heading.replaceChildren(document.createTextNode('搜索结果'),textNode('span',String(Number(root.dataset.localTotal||0)+data.items.length)));
  const list=textNode('div','','resource-list');for(const [index,item] of data.items.entries()){

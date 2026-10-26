@@ -35,13 +35,14 @@ test('简化后台、发布与搜索记录',async t=>{
   const url=seed.url+'-updated';assert.equal((await request('/api/admin/resources/'+id,'PUT',{...seed,url})).status,200);
   assert.equal((await request('/go/'+linkId)).headers.get('location'),url);
  });
- await t.test('未命中搜索合并大小写和空白，网络接口不重复计数',async()=>{
+ await t.test('仅打开搜索页或关闭网络来源不记录未命中搜索',async()=>{
   const q=`Missing-${nonce} Excel`;
   for(const keyword of [q,`  MISSING-${nonce}   EXCEL `])assert.equal((await request('/?q='+encodeURIComponent(keyword))).status,200);
-  let record=(await backup()).search_misses.find(r=>r.keyword===q.toLowerCase());assert.equal(record.count,2);assert.ok(record.first_searched_at);assert.ok(record.last_searched_at);
+  assert.equal((await backup()).search_misses.find(r=>r.keyword===q.toLowerCase()),undefined);
   await request('/api/network-search','POST',{q,sources:[]});await request('/?q='+encodeURIComponent(q)+'&page=2');await request('/?q=');
-  record=(await backup()).search_misses.find(r=>r.keyword===q.toLowerCase());assert.equal(record.count,2);
-  const html=await (await request('/admin/search-misses')).text();assert.ok(html.includes(q.toLowerCase()));
+  assert.equal((await backup()).search_misses.find(r=>r.keyword===q.toLowerCase()),undefined);
+  const html=await (await request('/admin/search-misses')).text();assert.ok(!html.includes(q.toLowerCase()));assert.match(html,/网络搜索有结果/);
+  const paged=await (await request('/?q='+encodeURIComponent(q)+'&page=2')).text();assert.match(paged,/data-page="2"/);
  });
  await t.test('CSV 模板两列、预览不入库、确认即发布、拒绝重复及缺失链接',async()=>{
   assert.equal((await (await request('/api/admin/import-template')).text()).replace(/^\uFEFF/,''),'title,url\r\n');

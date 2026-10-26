@@ -33,10 +33,6 @@ app.get('/',async c=>{
   if(!q){const name=await siteName(c.env.DB,c.env.SITE_NAME);return c.html(layout('资源搜索',home([],[],0,'','',1,provider,[]),name,{canonical:c.env.SITE_ORIGIN?c.env.SITE_ORIGIN+'/':undefined}));}
   const page=Math.max(1,Math.min(10000,parseInt(c.req.query('page')||'1')||1));
   const [local,name]=await Promise.all([localSearch(c.env.DB,q,provider,category,page),siteName(c.env.DB,c.env.SITE_NAME)]);
-  if(!local.total&&page===1&&c.req.method==='GET'&&!category){
-    const keyword=q.replace(/\s+/g,' ').toLowerCase();
-    await c.env.DB.prepare("INSERT INTO search_misses(keyword,count) VALUES(?,1) ON CONFLICT(keyword) DO UPDATE SET count=count+1,last_searched_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')").bind(keyword).run().catch(err=>console.error('Search tracking unavailable',err.message));
-  }
   return c.html(layout(q?`搜索：${q}`:'发现资源',home(local.items,[],local.total,q,category,page,provider,selectedProviders(provider)),name,{noindex:!!q,canonical:!q&&!category&&!provider&&page===1&&c.env.SITE_ORIGIN?c.env.SITE_ORIGIN+'/':undefined}));
 });
 app.get('/r/:id',async c=>{
@@ -108,7 +104,7 @@ app.get('/admin/search-misses',async c=>{
   const rows=(await c.env.DB.prepare('SELECT * FROM search_misses ORDER BY last_searched_at DESC,keyword LIMIT 51 OFFSET ?').bind((page-1)*50).all<{keyword:string;count:number;first_searched_at:string;last_searched_at:string}>()).results;
   const clicks=(await c.env.DB.prepare('SELECT keyword,title,url,count(*) clicks,max(clicked_at) latest FROM network_result_clicks WHERE keyword IN (SELECT keyword FROM search_misses ORDER BY last_searched_at DESC,keyword LIMIT 50 OFFSET ?) GROUP BY keyword,url ORDER BY latest DESC').bind((page-1)*50).all<{keyword:string;title:string;url:string;clicks:number;latest:string}>()).results;
   const time=(v:string)=>e(new Date(v).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}));
-  return c.html(layout('未命中搜索',adminHeading('未命中搜索','记录本站资源库没有匹配内容的搜索词，即使网络搜索有结果也会记录。相同词合并计数；同时记录用户点击的网络资源。','<a class="button" href="/api/admin/search-misses/export">导出 CSV ↓</a>')+`<section class="panel"><div class="table-wrap"><table><thead><tr><th>搜索词</th><th>搜索次数</th><th>首次搜索</th><th>最近搜索</th><th>点击的网络资源</th></tr></thead><tbody>${rows.slice(0,50).map(r=>`<tr><td>${e(r.keyword)}</td><td>${r.count}</td><td>${time(r.first_searched_at)}</td><td>${time(r.last_searched_at)}</td><td>${clicks.filter(x=>x.keyword===r.keyword).map(x=>`<p><a href="${e(x.url)}" target="_blank" rel="noopener noreferrer">${e(x.title)}</a><br><small>${x.clicks} 次点击 · ${time(x.latest)}</small></p>`).join('')||'暂无点击'}</td></tr>`).join('')||'<tr><td colspan="5" class="empty-cell">暂时没有未命中的搜索。</td></tr>'}</tbody></table></div><nav class="pagination">${page>1?`<a href="?page=${page-1}">上一页</a>`:''}<span>第 ${page} 页</span>${rows.length>50?`<a href="?page=${page+1}">下一页</a>`:''}</nav></section>`,await siteName(c.env.DB,c.env.SITE_NAME),adminOpts(c.env,'search-misses')));
+  return c.html(layout('未命中搜索',adminHeading('未命中搜索','仅记录对应网盘在本站无匹配、但网络搜索有结果的搜索词。相同词合并计数；同时记录用户点击的网络资源。','<a class="button" href="/api/admin/search-misses/export">导出 CSV ↓</a>')+`<section class="panel"><div class="table-wrap"><table><thead><tr><th>搜索词</th><th>搜索次数</th><th>首次搜索</th><th>最近搜索</th><th>点击的网络资源</th></tr></thead><tbody>${rows.slice(0,50).map(r=>`<tr><td>${e(r.keyword)}</td><td>${r.count}</td><td>${time(r.first_searched_at)}</td><td>${time(r.last_searched_at)}</td><td>${clicks.filter(x=>x.keyword===r.keyword).map(x=>`<p><a href="${e(x.url)}" target="_blank" rel="noopener noreferrer">${e(x.title)}</a><br><small>${x.clicks} 次点击 · ${time(x.latest)}</small></p>`).join('')||'暂无点击'}</td></tr>`).join('')||'<tr><td colspan="5" class="empty-cell">暂时没有未命中的搜索。</td></tr>'}</tbody></table></div><nav class="pagination">${page>1?`<a href="?page=${page-1}">上一页</a>`:''}<span>第 ${page} 页</span>${rows.length>50?`<a href="?page=${page+1}">下一页</a>`:''}</nav></section>`,await siteName(c.env.DB,c.env.SITE_NAME),adminOpts(c.env,'search-misses')));
 });
 app.get('/api/admin/search-misses/export',async c=>{
  const rows=(await c.env.DB.prepare(`SELECT m.keyword,m.count,m.first_searched_at,m.last_searched_at,n.title,n.url,count(n.id) clicks,max(n.clicked_at) last_clicked_at FROM search_misses m LEFT JOIN network_result_clicks n ON n.keyword=m.keyword GROUP BY m.keyword,n.url ORDER BY m.last_searched_at DESC,m.keyword,last_clicked_at DESC`).all<Record<string,unknown>>()).results;
@@ -188,6 +184,7 @@ app.post('/api/network-search',async c=>{
  const provider=typeof b.provider==='string'?b.provider:'quark';
  if((b.provider!==undefined&&typeof b.provider!=='string')||!selectedProviders(provider).length)return c.json({error:'不支持的网盘类型。'},400);
  const category=typeof b.category==='string'?b.category.slice(0,64):'';
+ const page=Math.max(1,Math.min(10000,Number.isInteger(b.page)?b.page:1));
  const inventory=await localSearch(c.env.DB,q,provider,category,1,true);
  const cloudTypes=selectedProviders(provider);
  const missing=inventory.missingProviders;
@@ -200,8 +197,10 @@ app.post('/api/network-search',async c=>{
  const localKeys=inventory.links.map(link=>shareIdentity(link.provider,link.url)).sort();
  const cache=caches.default,key=new Request(new URL('/_network-cache/'+await hash(JSON.stringify([q,ids,cloudTypes,localKeys,category,'pansou-v6-combined'])),c.req.url));
  const tracked=async(data:any)=>{
-   if(!data.items?.length||!data.items.some((item:any)=>missing.includes(item.provider)))return c.json(data);
-   try{const clickToken=await issueClickToken(cache,c.req.url,{keyword:q.replace(/\s+/g,' ').toLowerCase(),items:data.items.map((item:any)=>({title:item.title,url:item.url,provider:item.provider,trackMiss:missing.includes(item.provider)}))});return c.json({...data,clickToken});}
+   if(page!==1||category||!data.items?.some((item:any)=>missing.includes(item.provider)))return c.json(data);
+   const keyword=q.replace(/\s+/g,' ').toLowerCase();
+   await c.env.DB.prepare("INSERT INTO search_misses(keyword,count) VALUES(?,1) ON CONFLICT(keyword) DO UPDATE SET count=count+1,last_searched_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')").bind(keyword).run().catch(err=>console.error('Search tracking unavailable',err.message));
+   try{const clickToken=await issueClickToken(cache,c.req.url,{keyword,items:data.items.map((item:any)=>({title:item.title,url:item.url,provider:item.provider,trackMiss:missing.includes(item.provider)}))});return c.json({...data,clickToken});}
    catch(err){console.error('Click tracking unavailable');return c.json(data);}
  };
  const cached=await cache.match(key);if(cached)return tracked({...await cached.json<any>(),cached:true});
