@@ -261,3 +261,36 @@ test('分享子目录与完整分享分别去重，标记不可关联其他资�
  const csv=await (await f.admin('/api/admin/search-misses/export')).text();
  assert.ok(!csv.includes('子目录一'));assert.ok(csv.includes('完整分享'));assert.ok(csv.includes('子目录二'));
 });
+
+test('按网盘导出时排除已处理夸克来源，百度同路径分享仍保留',async t=>{
+ const f=fixture(t);f.miss('excel','quark');f.miss('excel','baidu');
+ const quark='https://pan.quark.cn/s/same-path',baidu='https://pan.baidu.com/s/same-path';
+ f.click('quark-source','excel','quark','夸克已处理资料',quark);
+ f.click('baidu-source','excel','baidu','百度待处理资料',baidu);
+ f.own('quark','自己的资源');
+ assert.equal((await f.request('/api/admin/search-misses/processed','POST',{sourceUrl:quark,resourceId:'own-quark'},true)).status,200);
+ const quarkCSV=await (await f.admin('/api/admin/search-misses/export?provider=quark')).text();
+ assert.equal(quarkCSV.trim().split(/\r?\n/).length,1);assert.ok(!quarkCSV.includes('夸克已处理资料'));assert.ok(!quarkCSV.includes('百度待处理资料'));
+ const baiduCSV=await (await f.admin('/api/admin/search-misses/export?provider=baidu')).text();
+ assert.ok(baiduCSV.includes('百度待处理资料'));assert.ok(baiduCSV.includes(baidu));assert.ok(!baiduCSV.includes('夸克已处理资料'));
+ const allCSV=await (await f.admin('/api/admin/search-misses/export')).text();
+ assert.ok(!allCSV.includes('夸克已处理资料'));assert.ok(allCSV.includes('百度待处理资料'));
+});
+
+test('历史未分类来源已处理后不再导出，保留历史分类和待处理来源',async t=>{
+ const f=fixture(t);f.miss('旧词-已完成','unknown',7);f.miss('旧词-待处理','unknown',3);
+ const source='https://pan.quark.cn/s/legacy-processed';
+ f.click('legacy-processed','旧词-已完成','unknown','历史已处理资料',source);
+ f.click('legacy-pending','旧词-待处理','unknown','历史待处理资料','https://pan.baidu.com/s/legacy-pending');
+ f.own('quark','自己的资源');
+ assert.equal((await f.request('/api/admin/search-misses/processed','POST',{sourceUrl:source,resourceId:'own-quark'},true)).status,200);
+ for(const query of ['','?provider=unknown']){
+  const csv=await (await f.admin('/api/admin/search-misses/export'+query)).text();
+  assert.ok(!csv.includes('历史已处理资料'));assert.ok(!csv.includes('旧词-已完成'));assert.ok(csv.includes('历史待处理资料'));assert.ok(csv.includes('历史未分类'));
+ }
+ const html=await (await f.admin('/admin/search-misses?provider=unknown')).text();
+ assert.ok(html.includes('历史已处理资料'));assert.ok(html.includes('已转存入库'));assert.ok(html.includes('历史待处理资料'));
+ assert.deepEqual(f.misses().map(({keyword,provider,count})=>({keyword,provider,count})),[
+  {keyword:'旧词-已完成',provider:'unknown',count:7},{keyword:'旧词-待处理',provider:'unknown',count:3}
+ ]);
+});
