@@ -1,7 +1,7 @@
 import { issueClickToken, readClick, csvCell } from './search-tracking';
 export { PanSouContainer } from './pansou-container';
 import { searchSources, networkSearch } from './network-search';
-import { identifyProvider, selectedProviders, extractionCode, shareIdentity } from './providers';
+import { identifyProvider, selectedProviders, extractionCode, shareIdentity, shareUrl } from './providers';
 import { localSearch } from './local-search';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -25,6 +25,18 @@ app.notFound(c=>c.html(layout('页面未找到',`<div class="empty"><span>404</s
 const cats = async(db:D1Database) => (await db.prepare('SELECT * FROM categories ORDER BY position,name').all<Category>()).results;
 const siteName = async(db:D1Database, fallback:string) => (await db.prepare("SELECT value FROM settings WHERE key='site_name'").first<{value:string}>())?.value||fallback;
 const adminOpts = (env:AppEnv['Bindings'],nav:string) => ({admin:true,local:env.ENVIRONMENT==='local',nav,noindex:true});
+
+function sourceIdentity(raw:string):string|null {
+  const provider=identifyProvider(raw),url=provider&&shareUrl(provider,raw);
+  if(!provider||!url)return null;
+  // A Quark share can point at a specific subdirectory. Do not conflate it with the whole share.
+  const subdir=provider==='quark'?new URL(raw).hash.match(/^#\/list\/share\/([a-z0-9_-]+)(?:[/?#]|$)/i)?.[1]:undefined;
+  return shareIdentity(provider,url)+(subdir?'#/list/share/'+subdir:'');
+}
+async function processedSources(db:D1Database){
+  const rows=(await db.prepare(`SELECT p.source_identity FROM processed_search_resources p JOIN resources r ON r.id=p.resource_id AND r.status='published' WHERE EXISTS (SELECT 1 FROM links l WHERE l.resource_id=r.id AND l.status='active' AND l.url=p.target_url)`).all<{source_identity:string}>()).results;
+  return new Set(rows.map(r=>r.source_identity));
+}
 
 app.get('/health',async c=>{await c.env.DB.prepare('SELECT 1').first();return c.json({ok:true});});
 app.get('/',async c=>{
@@ -103,15 +115,32 @@ app.get('/admin/search-misses',async c=>{
   const page=Math.max(1,Math.min(10000,parseInt(c.req.query('page')||'1')||1));
   const rows=(await c.env.DB.prepare('SELECT * FROM search_misses ORDER BY last_searched_at DESC,keyword LIMIT 51 OFFSET ?').bind((page-1)*50).all<{keyword:string;count:number;first_searched_at:string;last_searched_at:string}>()).results;
   const clicks=(await c.env.DB.prepare('SELECT keyword,title,url,count(*) clicks,max(clicked_at) latest FROM network_result_clicks WHERE keyword IN (SELECT keyword FROM search_misses ORDER BY last_searched_at DESC,keyword LIMIT 50 OFFSET ?) GROUP BY keyword,url ORDER BY latest DESC').bind((page-1)*50).all<{keyword:string;title:string;url:string;clicks:number;latest:string}>()).results;
+  const processed=await processedSources(c.env.DB);
   const time=(v:string)=>e(new Date(v).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}));
-  return c.html(layout('未命中搜索',adminHeading('未命中搜索','仅记录对应网盘在本站无匹配、但网络搜索有结果的搜索词。相同词合并计数；同时记录用户点击的网络资源。','<a class="button" href="/api/admin/search-misses/export">导出 CSV ↓</a>')+`<section class="panel"><div class="table-wrap"><table><thead><tr><th>搜索词</th><th>搜索次数</th><th>首次搜索</th><th>最近搜索</th><th>点击的网络资源</th></tr></thead><tbody>${rows.slice(0,50).map(r=>`<tr><td>${e(r.keyword)}</td><td>${r.count}</td><td>${time(r.first_searched_at)}</td><td>${time(r.last_searched_at)}</td><td>${clicks.filter(x=>x.keyword===r.keyword).map(x=>`<p><a href="${e(x.url)}" target="_blank" rel="noopener noreferrer">${e(x.title)}</a><br><small>${x.clicks} 次点击 · ${time(x.latest)}</small></p>`).join('')||'暂无点击'}</td></tr>`).join('')||'<tr><td colspan="5" class="empty-cell">暂时没有未命中的搜索。</td></tr>'}</tbody></table></div><nav class="pagination">${page>1?`<a href="?page=${page-1}">上一页</a>`:''}<span>第 ${page} 页</span>${rows.length>50?`<a href="?page=${page+1}">下一页</a>`:''}</nav></section>`,await siteName(c.env.DB,c.env.SITE_NAME),adminOpts(c.env,'search-misses')));
+  return c.html(layout('未命中搜索',adminHeading('未命中搜索','仅记录对应网盘在本站无匹配、但网络搜索有结果的搜索词。相同词合并计数；同时记录用户点击的网络资源。','<a class="button" href="/api/admin/search-misses/export">导出 CSV ↓</a>')+`<section class="panel"><p class="hint">导出不包含已转存并入库的资源。</p><div class="table-wrap"><table><thead><tr><th>搜索词</th><th>搜索次数</th><th>首次搜索</th><th>最近搜索</th><th>点击的网络资源</th></tr></thead><tbody>${rows.slice(0,50).map(r=>`<tr><td>${e(r.keyword)}</td><td>${r.count}</td><td>${time(r.first_searched_at)}</td><td>${time(r.last_searched_at)}</td><td>${clicks.filter(x=>x.keyword===r.keyword).map(x=>`<p><a href="${e(x.url)}" target="_blank" rel="noopener noreferrer">${e(x.title)}</a><br><small>${x.clicks} 次点击 · ${time(x.latest)}${processed.has(sourceIdentity(x.url)||'')?' · 已转存入库':''}</small></p>`).join('')||'暂无点击'}</td></tr>`).join('')||'<tr><td colspan="5" class="empty-cell">暂时没有未命中的搜索。</td></tr>'}</tbody></table></div><nav class="pagination">${page>1?`<a href="?page=${page-1}">上一页</a>`:''}<span>第 ${page} 页</span>${rows.length>50?`<a href="?page=${page+1}">下一页</a>`:''}</nav></section>`,await siteName(c.env.DB,c.env.SITE_NAME),adminOpts(c.env,'search-misses')));
 });
 app.get('/api/admin/search-misses/export',async c=>{
  const rows=(await c.env.DB.prepare(`SELECT m.keyword,m.count,m.first_searched_at,m.last_searched_at,n.title,n.url,count(n.id) clicks,max(n.clicked_at) last_clicked_at FROM search_misses m LEFT JOIN network_result_clicks n ON n.keyword=m.keyword GROUP BY m.keyword,n.url ORDER BY m.last_searched_at DESC,m.keyword,last_clicked_at DESC`).all<Record<string,unknown>>()).results;
+ const processed=await processedSources(c.env.DB);
  const columns=['keyword','count','first_searched_at','last_searched_at','title','url','clicks','last_clicked_at'];
  const header=['搜索词','搜索次数','首次搜索时间（UTC）','最近搜索时间（UTC）','点击的资源标题','网盘链接','点击次数','最近点击时间（UTC）'];
  c.header('Content-Type','text/csv;charset=utf-8');c.header('Content-Disposition','attachment; filename="search-misses.csv"');
- return c.body('\uFEFF'+[header.map(csvCell).join(','),...rows.map(r=>columns.map(k=>csvCell(r[k])).join(','))].join('\r\n')+'\r\n');
+ return c.body('\uFEFF'+[header.map(csvCell).join(','),...rows.filter(r=>!r.url||!processed.has(sourceIdentity(String(r.url))||'')).map(r=>columns.map(k=>csvCell(r[k])).join(','))].join('\r\n')+'\r\n');
+});
+app.post('/api/admin/search-misses/processed',async c=>{
+ const b=await c.req.json().catch(()=>null);
+ if(typeof b?.sourceUrl!=='string'||b.sourceUrl.length>2048||typeof b?.resourceId!=='string'||!b.resourceId)return c.json({error:'请提供来源链接和已发布资源。'},400);
+ const sourceUrl=b.sourceUrl.trim(),identity=sourceIdentity(sourceUrl);
+ if(!identity)return c.json({error:'来源链接无效。'},400);
+ if(!await c.env.DB.prepare('SELECT id FROM network_result_clicks WHERE url=? LIMIT 1').bind(sourceUrl).first())return c.json({error:'来源链接不在已记录的点击中。'},404);
+ const target=await c.env.DB.prepare("SELECT l.url FROM resources r JOIN links l ON l.resource_id=r.id AND l.status='active' WHERE r.id=? AND r.status='published' ORDER BY l.position,l.id LIMIT 1").bind(b.resourceId).first<{url:string}>();
+ if(!target||!identifyProvider(target.url))return c.json({error:'资源尚未发布或没有有效的分享链接。'},400);
+ const existing=await c.env.DB.prepare('SELECT resource_id FROM processed_search_resources WHERE source_identity=?').bind(identity).first<{resource_id:string}>();
+ if(existing&&existing.resource_id!==b.resourceId)return c.json({error:'来源链接已经关联其他资源。'},409);
+ await c.env.DB.prepare("INSERT INTO processed_search_resources(source_identity,source_url,resource_id,target_url) VALUES(?,?,?,?) ON CONFLICT(source_identity) DO UPDATE SET target_url=excluded.target_url,processed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE resource_id=excluded.resource_id").bind(identity,sourceUrl,b.resourceId,target.url).run();
+ const saved=await c.env.DB.prepare('SELECT resource_id FROM processed_search_resources WHERE source_identity=?').bind(identity).first<{resource_id:string}>();
+ if(saved?.resource_id!==b.resourceId)return c.json({error:'来源链接已经关联其他资源。'},409);
+ return c.json({ok:true});
 });
 app.post('/api/network-click',async c=>{
  const b=await c.req.json().catch(()=>null);
@@ -136,7 +165,7 @@ app.put('/api/admin/settings',async c=>{const b=await c.req.json();if(typeof b.s
 app.get('/admin/data',async c=>c.html(layout('导入与备份',adminHeading('导入与备份','批量整理已有资源，保留一份自己的数据副本。')+`<div class="admin-two-col"><section class="panel"><h2>从 CSV 导入资源</h2><p class="muted">每次最多 15 条，先检查内容再确认导入。确认后直接发布。</p><a class="text-link" href="/api/admin/import-template">下载 CSV 模板 ↓</a><label>选择 CSV 文件<input id="csv-file" type="file" accept=".csv,text/csv"></label><p class="hint">列名：title（标题）、url（链接）。自动识别网盘类型，无需增加列。</p><div id="import-preview"></div><button class="button primary" id="confirm-import" hidden>确认导入并发布</button></section><section class="panel"><h2>导出网站数据</h2><p>导出资源、网盘链接、搜索记录、资源需求、点击统计和网站设置（包含历史数据）。</p><a class="button" href="/api/admin/export">下载 JSON 备份 ↓</a><p class="hint">当前不存储图片。JSON 可用于检查和迁移；完整数据库恢复请使用部署文档中的 D1 备份方式。</p><hr><h2>演示资料</h2><p class="muted">正式使用前，可以清空本地预置的演示资源。你自己发布的资源会保留。</p><button class="button" id="clear-demo">清空演示资料</button></section></div>`,await siteName(c.env.DB,c.env.SITE_NAME),adminOpts(c.env,'data'))));
 app.get('/api/admin/import-template',c=>{c.header('Content-Type','text/csv;charset=utf-8');c.header('Content-Disposition','attachment; filename="resource-template.csv"');return c.body('\uFEFFtitle,url\r\n');});
 app.get('/api/admin/export',async c=>{
-  const tables=['categories','resources','links','reports','resource_requests','search_misses','network_result_clicks','daily_clicks','settings'];const data:Record<string,unknown>={version:1,exported_at:new Date().toISOString()};
+  const tables=['categories','resources','links','reports','resource_requests','search_misses','network_result_clicks','processed_search_resources','daily_clicks','settings'];const data:Record<string,unknown>={version:1,exported_at:new Date().toISOString()};
   for(const t of tables)data[t]=(await c.env.DB.prepare(`SELECT * FROM ${t}`).all()).results;
   c.header('Content-Disposition',`attachment; filename="resource-hub-${new Date().toISOString().slice(0,10)}.json"`);return c.json(data);
 });

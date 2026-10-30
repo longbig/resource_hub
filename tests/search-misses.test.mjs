@@ -46,13 +46,18 @@ function fixture(t){
    return Response.json({code:0,data:{total:items.length,merged_by_type:merged}});
   }})}
  };
- const request=async(path,method='GET',body)=>{
+ const request=async(path,method='GET',body,local=false)=>{
   const pending=[];
-  const response=await app.fetch(new Request(origin+path,{method,headers:{Origin:origin,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined}),env,{waitUntil:p=>pending.push(p)});
+  const requestOrigin=local?'http://127.0.0.1:8787':origin;
+  const bindings=local?{...env,ENVIRONMENT:'local',SITE_ORIGIN:requestOrigin}:env;
+  const response=await app.fetch(new Request(requestOrigin+path,{method,headers:{Origin:requestOrigin,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined}),bindings,{waitUntil:p=>pending.push(p)});
   await Promise.all(pending);return response;
  };
  return {
   request,
+  admin:path=>request(path,'GET',undefined,true),
+  miss(keyword,provider,count=1){sqlite.prepare('INSERT INTO search_misses(keyword,count) VALUES(?,?)').run(keyword,count);},
+  click(id,keyword,provider,title,url){sqlite.prepare('INSERT INTO network_result_clicks(id,keyword,title,url) VALUES(?,?,?,?)').run(id,keyword,title,url);},
   async search(body={}){const response=await request('/api/network-search','POST',{q:'Excel',provider:'quark',sources:['pansearch'],...body});assert.equal(response.status,200);return response.json();},
   misses:()=>sqlite.prepare('SELECT * FROM search_misses ORDER BY keyword').all().map(row=>({...row})),
   clicks:()=>sqlite.prepare('SELECT * FROM network_result_clicks').all().map(row=>({...row})),
@@ -135,4 +140,44 @@ test('分页和分类查询不记录缺口，第一页复用缓存时正常计�
   const data=await f.search(body);assert.equal(data.items.length,1);assert.deepEqual(f.misses(),[]);assert.equal(data.clickToken,undefined);
  }
  const first=await f.search({page:1});assert.equal(first.cached,true);assert.equal(f.misses()[0].count,1);
+});
+
+test('只有已发布并有可用链接的入库资源可标记，已处理来源不再导出且历史仍可见',async t=>{
+ const f=fixture(t);
+ f.miss('已完成','quark');f.miss('同源别词','quark');f.miss('无点击','quark');f.miss('还有其他链接','quark');
+ const source='https://pan.quark.cn/s/abc123?pwd=1234';
+ f.click('a','已完成','quark','已处理内容',source);
+ f.click('b','同源别词','quark','同一个分享','https://pan.quark.cn/s/abc123?utm_source=tracking');
+ f.click('c','还有其他链接','quark','尚未处理','https://pan.quark.cn/s/unprocessed');
+ f.click('d','还有其他链接','quark','已处理的另一条',source);
+ const post=(body,local=true)=>f.request('/api/admin/search-misses/processed','POST',body,local);
+ assert.equal((await post({sourceUrl:source,resourceId:'missing'})).status,400);
+ assert.equal((await post({sourceUrl:'https://pan.quark.cn/s/not-clicked',resourceId:'missing'})).status,404);
+ assert.equal((await post({sourceUrl:source,resourceId:'missing'},false)).status,503);
+ f.own('quark','自己的资源');
+ assert.equal((await post({sourceUrl:source,resourceId:'own-quark'})).status,200);
+ assert.equal((await post({sourceUrl:source,resourceId:'own-quark'})).status,200);
+ const csv=await (await f.admin('/api/admin/search-misses/export')).text();
+ assert.ok(!csv.includes('abc123'));assert.ok(!csv.includes('已完成'));assert.ok(!csv.includes('同源别词'));
+ assert.ok(csv.includes('无点击'));assert.ok(csv.includes('尚未处理'));assert.ok(csv.includes('unprocessed'));
+ const html=await (await f.admin('/admin/search-misses')).text();assert.ok(html.includes('已处理内容'));assert.ok(html.includes('已转存入库'));
+ const backup=await (await f.admin('/api/admin/export')).json();assert.equal(backup.processed_search_resources.length,1);
+ assert.equal((await f.request('/api/admin/resources/own-quark','PUT',{title:'自己的资源',url:'https://pan.quark.cn/s/replaced'},true)).status,200);
+ assert.ok((await (await f.admin('/api/admin/search-misses/export')).text()).includes('abc123'));
+ assert.equal((await post({sourceUrl:source,resourceId:'own-quark'})).status,200);
+ assert.ok(!(await (await f.admin('/api/admin/search-misses/export')).text()).includes('abc123'));
+ assert.equal((await f.request('/api/admin/resources/own-quark','DELETE',undefined,true)).status,200);
+ const after=await (await f.admin('/api/admin/search-misses/export')).text();assert.ok(after.includes('abc123'));assert.ok(after.includes('已完成'));
+});
+
+test('分享子目录与完整分享分别去重，标记不可关联其他资源',async t=>{
+ const f=fixture(t);f.miss('子目录','quark');
+ const root='https://pan.quark.cn/s/share',sub=root+'#/list/share/fid1',other=root+'#/list/share/fid2';
+ f.click('root','子目录','quark','完整分享',root);f.click('sub','子目录','quark','子目录一',sub);f.click('other','子目录','quark','子目录二',other);
+ f.own('quark','资源一');f.own('baidu','资源二');
+ const post=body=>f.request('/api/admin/search-misses/processed','POST',body,true);
+ assert.equal((await post({sourceUrl:sub,resourceId:'own-quark'})).status,200);
+ assert.equal((await post({sourceUrl:sub,resourceId:'own-baidu'})).status,409);
+ const csv=await (await f.admin('/api/admin/search-misses/export')).text();
+ assert.ok(!csv.includes('子目录一'));assert.ok(csv.includes('完整分享'));assert.ok(csv.includes('子目录二'));
 });
