@@ -22,12 +22,13 @@ test('组合结果的未命中记录资格由服务器凭据决定，保留原�
   {title:'未命中网盘的结果',url:'https://pan.baidu.com/s/def',provider:'baidu',trackMiss:true}
  ]};
  const token=await issueClickToken(cache,origin,data);
- assert.equal((await readClick(cache,origin,token,0)).trackMiss,false);
- assert.equal((await readClick(cache,origin,token,1)).trackMiss,true);
+ const existing=await readClick(cache,origin,token,0),missing=await readClick(cache,origin,token,1);
+ assert.equal(existing.trackMiss,false);assert.equal(existing.provider,'quark');
+ assert.equal(missing.trackMiss,true);assert.equal(missing.provider,'baidu');
 });
 test('后台导出完整 CSV，点击接口拒绝伪造及跨站请求',async()=>{
  const base=process.env.TEST_ORIGIN||'http://127.0.0.1:8787';
- const response=await fetch(base+'/api/admin/search-misses/export');assert.equal(response.status,200);assert.match(response.headers.get('content-disposition'),/attachment/);const csv=await response.text();assert.match(csv,/搜索词/);assert.match(csv,/点击的资源标题/);
+ const response=await fetch(base+'/api/admin/search-misses/export');assert.equal(response.status,200);assert.match(response.headers.get('content-disposition'),/attachment/);const csv=await response.text();assert.match(csv,/搜索词/);assert.match(csv,/网盘类型/);assert.match(csv,/点击的资源标题/);
  for(const [origin,status] of [[base,400],['https://evil.example',403]]){
   const r=await fetch(base+'/api/network-click',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({token:'fake',index:0,url:'https://pan.quark.cn/s/fake'})});assert.equal(r.status,status);
  }
