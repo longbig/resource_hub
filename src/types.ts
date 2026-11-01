@@ -3,6 +3,7 @@ export type Bindings = {
   DB: D1Database; ASSETS: Fetcher;
   ENVIRONMENT: string; SITE_NAME: string; SITE_ORIGIN: string;
   ACCESS_TEAM_DOMAIN: string; ACCESS_AUD: string; ADMIN_EMAILS: string;
+  AUTOMATION_API_TOKEN?: string;
 };
 export type Category = { id: string; name: string; description: string; position: number; count?: number };
 export type Resource = {
@@ -12,4 +13,4 @@ export type Resource = {
   created_at: string; updated_at: string; clicks?: number; share_id?:string; share_url?:string; share_code?:string; share_provider?:string;
 };
 export type Link = { id: string; resource_id: string; provider: string; url: string; code: string; status: string; position: number };
-export type AppEnv = { Bindings: Bindings; Variables: { admin: string } };
+export type AppEnv = { Bindings: Bindings; Variables: { admin: string; automation: boolean } };

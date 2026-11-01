@@ -115,4 +115,6 @@ R2 图片另用 Cloudflare 控制台或 S3 兼容备份工具复制到私人备�
 
 ### 保留平台上的 Access 配置
 
+AI 自动化接口使用独立的 `AUTOMATION_API_TOKEN` Worker Secret。通过 `npx wrangler secret put AUTOMATION_API_TOKEN --env=""` 配置，客户端保存同一密钥；不要写入代码或普通构建变量。`/api/automation/*` 使用该密钥认证，不通过管理员邮箱放行；现有后台登录策略保持独立。详细操作见 [AUTOMATION.md](AUTOMATION.md)。这组接口复用现有数据库结构，无新增迁移。
+
 生产环境的 `ACCESS_AUD` 与 `ACCESS_TEAM_DOMAIN` 在 Worker 设置中的“变量和机密”管理，不放在构建环境变量中，也不写入仓库。`wrangler.jsonc` 顶层设置 `keep_vars: true`，确保 GitHub 自动部署保留平台普通变量。也可使用 Worker Secret。已丢失的变量需在平台重新设置并部署一次；此设置不会恢复历史值。

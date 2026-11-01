@@ -1,13 +1,15 @@
 import { issueClickToken, readClick, csvCell } from './search-tracking';
 export { PanSouContainer } from './pansou-container';
 import { searchSources, networkSearch } from './network-search';
-import { identifyProvider, selectedProviders, extractionCode, shareIdentity, shareUrl, enabledProviderIds } from './providers';
+import { identifyProvider, selectedProviders, extractionCode, shareIdentity, enabledProviderIds } from './providers';
 import { localSearch } from './local-search';
+import automation from './automation';
+import { sourceIdentity, processedSources } from './processed-resources';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { secureHeaders } from 'hono/secure-headers';
 import type { AppEnv, Resource, Link, Category } from './types';
-import { adminAuth, sameOrigin, providers, validLink } from './security';
+import { adminAuth, automationAuth, sameOrigin, providers, validLink } from './security';
 import { layout, home, detail, editor, e, adminHeading, option } from './views';
 
 const app = new Hono<AppEnv>();
@@ -15,11 +17,13 @@ const uid = () => crypto.randomUUID().replace(/-/g,'');
 const selectResource = `SELECT r.*,c.name category_name FROM resources r LEFT JOIN categories c ON r.category_id=c.id`;
 app.use('*', secureHeaders({ contentSecurityPolicy: { defaultSrc: ["'self'"], scriptSrc:["'self'",'https://plausible.shipsolo.io'], styleSrc:["'self'"], imgSrc:["'self'",'data:','blob:'], fontSrc:["'self'"], connectSrc:["'self'",'https://plausible.shipsolo.io'], formAction:["'self'"], frameAncestors:["'none'"], baseUri:["'self'"] }, referrerPolicy:'strict-origin-when-cross-origin' }));
 app.use('*', async(c,next)=>{ c.header('Cache-Control','no-store'); await next(); });
+app.use('/api/automation/*',automationAuth);
 app.use('/api/*', sameOrigin);
 app.use('/api/*', bodyLimit({maxSize:6*1024*1024,onError:c=>c.json({error:'请求过大，图片最大 5 MB。'},413)}));
 app.use('/admin',adminAuth);
 app.use('/admin/*',adminAuth);
 app.use('/api/admin/*',adminAuth);
+app.route('/api/automation',automation);
 app.onError((err,c)=>{console.error(err.message);return c.json({error:'暂时无法完成操作，请稍后重试。'},500);});
 app.notFound(c=>c.html(layout('页面未找到',`<div class="empty"><span>404</span><h1>这份收藏暂时不在书架上</h1><p>资源可能已下架，或地址输入有误。</p><a class="button primary" href="/">返回资源书架</a></div>`,c.env.SITE_NAME,{noindex:true}),404));
 const cats = async(db:D1Database) => (await db.prepare('SELECT * FROM categories ORDER BY position,name').all<Category>()).results;
@@ -30,17 +34,6 @@ const validMissProvider = (id:string) => !id||id==='unknown'||enabledProviderIds
 const missProviderLabel = (id:string) => id==='unknown'?'历史未分类':providers[id]?.label||id;
 type SearchMiss = {keyword:string;provider:string;count:number;first_searched_at:string;last_searched_at:string};
 type NetworkClick = {keyword:string;provider:string;title:string;url:string;clicks:number;latest:string};
-function sourceIdentity(raw:string):string|null {
-  const provider=identifyProvider(raw),url=provider&&shareUrl(provider,raw);
-  if(!provider||!url)return null;
-  // A Quark share can point at a specific subdirectory. Do not conflate it with the whole share.
-  const subdir=provider==='quark'?new URL(raw).hash.match(/^#\/list\/share\/([a-z0-9_-]+)(?:[/?#]|$)/i)?.[1]:undefined;
-  return shareIdentity(provider,url)+(subdir?'#/list/share/'+subdir:'');
-}
-async function processedSources(db:D1Database){
-  const rows=(await db.prepare(`SELECT p.source_identity FROM processed_search_resources p JOIN resources r ON r.id=p.resource_id AND r.status='published' WHERE EXISTS (SELECT 1 FROM links l WHERE l.resource_id=r.id AND l.status='active' AND l.url=p.target_url)`).all<{source_identity:string}>()).results;
-  return new Set(rows.map(r=>r.source_identity));
-}
 
 app.get('/health',async c=>{await c.env.DB.prepare('SELECT 1').first();return c.json({ok:true});});
 app.get('/',async c=>{

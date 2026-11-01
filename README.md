@@ -72,3 +72,5 @@ npm test
 网盘类型、分享域名和链接规则集中维护在 `public/providers.json`，前后端共用。后台发布与 CSV 导入仍仅需 `title,url`，自动识别网盘和 URL 中的提取码。新增网盘可扩展此配置，PanSou 必须支持相同类型 ID；`check` 表示盘搜是否支持该类型的有效性检测。数据库无需新增迁移。
 
 未命中搜索的历史点击会保留。资源转存并发布后，可通过后台管理接口关联原分享链接与已发布资源；有效关联会显示为“已转存入库”，并从 CSV 导出中排除。资源下架、删除或更换目标链接后，该来源会重新进入导出。
+
+AI 自动化可直接查询 `/api/automation/resources` 的待处理 JSON，并向 `/api/automation/resources/complete` 提交转存结果，一次完成入库和来源标记。使用独立的 Cloudflare Secret 密钥；客户端命令为 `npm run --silent automation -- list --provider quark`。配置、参数和重试规则见 [自动化接口说明](docs/AUTOMATION.md)。

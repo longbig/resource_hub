@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "automation": "node scripts/automation-client.mjs",
     "dev": "node scripts/dev.mjs",
     "db:init": "wrangler d1 migrations apply DB --local --env local",
     "db:seed": "wrangler d1 execute DB --local --env local --file scripts/seed.sql",
