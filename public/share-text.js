@@ -19,7 +19,7 @@ export function parseQuarkShare(text) {
   const url=[...links.values()][0];
   const code=text.match(/(?:提取码|访问码|密码)\s*[:：]\s*([a-z0-9]{1,12})(?![a-z0-9])/i)?.[1];
   if(!url.searchParams.has('pwd')&&code)url.searchParams.set('pwd',code);
-  const header=text.match(/夸克网盘分享了\s*[:：]?\s*([「“『《"'])/);
+  const header=text.match(/夸克网盘\s*(?:给你\s*)?分享了\s*[:：]?\s*([「“『《"'])/);
   let title='';
   if(header){
     const open=header[1],close=({'「':'」','“':'”','『':'』','《':'》','"':'"',"'":"'"})[open];

@@ -7,6 +7,12 @@ test('原生夸克文案提取资源标题，不误识别 APP 名称',()=>{
  assert.equal(parseQuarkShare(sample.replace('「PS」','“PS 教程”')).title,'PS 教程');
  assert.equal(parseQuarkShare(sample.replace('「PS」','「PS「进阶」教程」')).title,'PS「进阶」教程');
 });
+test('新版给你分享文案提取标题，忽略分享口令和 APP 名称',()=>{
+ const text='我用夸克网盘给你分享了「200套大学生毕业答辩精选PPT模板」，点击链接或复制整段内容，打开「夸克网盘APP」即可获取。\n/~f83d3c54dO~:/\n链接：https://pan.quark.cn/s/809ef5cf0dc3';
+ const expected={title:'200套大学生毕业答辩精选PPT模板',url:'https://pan.quark.cn/s/809ef5cf0dc3'};
+ assert.deepEqual(parseQuarkShare(text),expected);
+ assert.deepEqual(parseQuarkShare(text.replace('夸克网盘给你分享了','夸克网盘 给你 分享了： ')),expected);
+});
 test('链接末尾标点、单独链接与提取码不会破坏分享地址',()=>{
  assert.deepEqual(parseQuarkShare('链接：https://pan.quark.cn/s/abc。\n提取码：1a2b'),{title:'',url:'https://pan.quark.cn/s/abc?pwd=1a2b'});
  assert.equal(parseQuarkShare('https://pan.quark.cn/s/abc?pwd=abcd&redirect=https://evil.example\n提取码：9999').url,'https://pan.quark.cn/s/abc?pwd=abcd');

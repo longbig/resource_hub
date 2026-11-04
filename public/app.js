@@ -32,7 +32,7 @@ if(resourceForm){
  // Pasting the native message into either existing field works too.
  for(const field of [resourceForm.elements.title,resourceForm.elements.url])field.addEventListener('paste',event=>{
   const text=event.clipboardData?.getData('text/plain');
-  if(text&&/夸克网盘分享了/.test(text)){event.preventDefault();shareText.value=text;markDirty();fillShare(text);}
+  if(text&&/夸克网盘\s*(?:给你\s*)?分享了/.test(text)){event.preventDefault();shareText.value=text;markDirty();fillShare(text);}
  });
 }
 window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
